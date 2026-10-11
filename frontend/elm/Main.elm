@@ -74,11 +74,9 @@ init theme =
       , repeatSingle = []
       , repeatDouble = []
       , selectedPage = 1
+      , selectedImpression = Nothing
+      , artworkMenu = Nothing
       , perArtwork = False
-      , showCut = True
-      , showBleed = True
-      , showGutters = False
-      , showPaths = False
       , zoom = 1
       , theme = theme
       , dialog = ""
@@ -490,7 +488,7 @@ updateOverride m change =
             m.request
 
         old =
-            List.filter (\p -> p.pageNumber == m.selectedPage) r.pageOverrides |> List.head |> Maybe.withDefault { pageNumber = m.selectedPage, finishedCutSize = Nothing, artworkFit = Nothing }
+            List.filter (\p -> p.pageNumber == m.selectedPage) r.pageOverrides |> List.head |> Maybe.withDefault { pageNumber = m.selectedPage, rotationDegrees = 0, finishedCutSize = Nothing, artworkFit = Nothing }
     in
     { r | pageOverrides = List.filter (\p -> p.pageNumber /= m.selectedPage) r.pageOverrides ++ [ change old ] }
 
@@ -652,7 +650,7 @@ updateInternal msg m =
             else
                 let
                     next =
-                        { m | operation = op, error = "", notice = "", epoch = m.epoch + 1, revision = m.revision + 1, previewToken = m.previewToken + 1 }
+                        { m | operation = op, error = "", notice = "", epoch = m.epoch + 1, revision = m.revision + 1, previewToken = m.previewToken + 1, selectedImpression = Nothing }
 
                     ( updated, cmd ) =
                         if op == Impose then
@@ -669,6 +667,35 @@ updateInternal msg m =
 
         Field key value ->
             field key value m
+
+        SelectImpression index page ->
+            if m.operation == Impose && page >= 1 && page <= Maybe.withDefault 0 m.request.sourcePageCount then
+                ( { m
+                    | selectedPage = page
+                    , selectedImpression = Just index
+                    , drafts =
+                        if page == m.selectedPage then
+                            m.drafts
+
+                        else
+                            artworkDrafts m.drafts
+                  }
+                , Cmd.none
+                )
+
+            else
+                ( m, Cmd.none )
+
+        RotateArtwork page rotation ->
+            if m.busy || m.operation /= Impose || page < 1 || page > Maybe.withDefault 0 m.request.sourcePageCount || not (List.member rotation [ 0, 90, 180, 270 ]) then
+                ( m, Cmd.none )
+
+            else
+                let
+                    ( next, cmd ) =
+                        schedule { m | request = updateOverride { m | selectedPage = page } (\p -> { p | rotationDegrees = rotation }), artworkMenu = Nothing }
+                in
+                ( next, Cmd.batch [ cmd, bridge "closeArtworkMenu" [] ] )
 
         CropAnchor x y ->
             let
@@ -921,6 +948,7 @@ updateInternal msg m =
                                     , error = ""
                                     , job = Nothing
                                     , selectedPage = 1
+                                    , selectedImpression = Nothing
                                     , sheet = 0
                                     , back = False
                                     , quantityDrafts = Dict.empty
@@ -963,7 +991,7 @@ updateInternal msg m =
             browserEvent event m
 
         Navigate sheet back ->
-            preview { m | sheet = max 0 sheet, back = back }
+            preview { m | sheet = max 0 sheet, back = back, selectedImpression = Nothing }
 
         Lease _ ->
             ( m, Maybe.map (.sourceId >> (\id -> request "PUT" ("gang-up/sources/" ++ id ++ "/lease") Http.emptyBody (expect (\_ -> NoOp) Ok) Nothing)) m.source |> Maybe.withDefault Cmd.none )
@@ -1202,6 +1230,9 @@ field key value m =
 
         "name" ->
             ( { m | savedName = value }, Cmd.none )
+
+        "artwork-rotation" ->
+            update (RotateArtwork m.selectedPage (String.toInt value |> Maybe.withDefault -1)) m
 
         "page" ->
             preview { m | selectedPage = String.toInt value |> Maybe.withDefault 1, drafts = artworkDrafts m.drafts }
@@ -1506,18 +1537,6 @@ toggle key m =
                         }
                 }
 
-        "cut" ->
-            ( { m | showCut = not m.showCut }, Cmd.none )
-
-        "bleed-lines" ->
-            ( { m | showBleed = not m.showBleed }, Cmd.none )
-
-        "gutters" ->
-            ( { m | showGutters = not m.showGutters }, Cmd.none )
-
-        "paths" ->
-            ( { m | showPaths = not m.showPaths }, Cmd.none )
-
         "zoom-in" ->
             ( { m | zoom = min 3 (m.zoom + 0.25) }, Cmd.none )
 
@@ -1724,6 +1743,22 @@ browserEvent event m =
 
         "theme" ->
             ( { m | theme = get "value" D.string m.theme }, Cmd.none )
+
+        "artworkMenu" ->
+            let
+                page =
+                    get "page" D.int 0
+            in
+            if m.operation == Impose && not m.busy && m.layoutReady && not m.previewLoading && page >= 1 && page <= Maybe.withDefault 0 m.request.sourcePageCount then
+                ( { m | selectedPage = page, selectedImpression = Just (get "index" D.int 0), artworkMenu = Just page, drafts = artworkDrafts m.drafts }
+                , bridge "artworkMenu" [ ( "x", E.float (get "x" D.float 0) ), ( "y", E.float (get "y" D.float 0) ), ( "trigger", E.string (get "trigger" D.string "") ) ]
+                )
+
+            else
+                ( m, Cmd.none )
+
+        "closeArtworkMenu" ->
+            ( { m | artworkMenu = Nothing }, Cmd.none )
 
         "closeDialog" ->
             ( { m | dialog = "" }, Cmd.none )

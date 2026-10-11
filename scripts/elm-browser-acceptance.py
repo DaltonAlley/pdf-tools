@@ -18,7 +18,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--url', default='http://127.0.0.1:3210')
 parser.add_argument('--browsers', default='chromium,firefox')
 parser.add_argument('--output', default='/tmp/pdf-elm-acceptance')
-parser.add_argument('--checks', default='theme,general,workspace_animation,recovery,intake_and_keyboard,finished_size_defaults,setup_tabs,fitting,mixed_and_saved,preview_recovery,lifecycle,responsive,startup')
+parser.add_argument('--checks', default='theme,general,workspace_animation,recovery,intake_and_keyboard,finished_size_defaults,setup_tabs,setup_geometry,artwork_first_open,preview_toolbar,impression_selection,artwork_rotation,fitting,mixed_and_saved,preview_recovery,lifecycle,responsive,startup')
 args = parser.parse_args()
 root = pathlib.Path(args.output)
 root.mkdir(parents=True, exist_ok=True)
@@ -209,6 +209,7 @@ class Suite:
         menu = self.page.locator('.elm-artwork-menu')
         if menu.get_attribute('open') is None:
             menu.locator('summary').click()
+        expect(menu.locator('fieldset')).to_be_visible()
         return menu
 
     def close_artwork(self):
@@ -382,7 +383,8 @@ class Suite:
         # Pointer reordering uses the same stable file identity.
         source=self.page.locator('.file-row').filter(has_text='a.pdf')
         target=self.page.locator('.file-row').filter(has_text='b.pdf')
-        source.drag_to(target)
+        # Drag from the filename area, away from the interactive row buttons.
+        source.drag_to(target, source_position={'x': 45, 'y': 18}, target_position={'x': 45, 'y': 18})
         expect(self.page.locator('.file-row').first).to_contain_text('a.pdf')
         self.select(three)
         self.idle()
@@ -463,7 +465,7 @@ class Suite:
         self.switch('Impose artwork')
         tabs = self.page.get_by_role('tablist', name='Print setup options')
         expect(tabs.get_by_role('tab')).to_have_count(4)
-        for name in ['Bleed', 'Arrangement', 'Quantity & sheet', 'Size']:
+        for name in ['Bleed', 'Arrangement', 'Sheet', 'Size']:
             tab = tabs.get_by_role('tab', name=name, exact=True)
             expect(tab).to_be_enabled()
             tab.click()
@@ -473,13 +475,13 @@ class Suite:
         self.page.locator('#finished-width').fill('4.')
         expect(self.button('Continue')).to_be_enabled()
         self.button('Continue').click()
-        expect(tabs.get_by_role('tab', name='Quantity & sheet', exact=True)).to_be_focused()
+        expect(tabs.get_by_role('tab', name='Sheet', exact=True)).to_be_focused()
         self.step('Bleed')
         expect(self.button('Download imposed PDF')).to_be_disabled()
         self.step('Size')
         expect(self.page.locator('#finished-width')).to_have_value('4.')
         expect(self.page.locator('#finished-width')).to_have_attribute('aria-invalid', 'true')
-        keys = [('ArrowLeft', 'Bleed'), ('ArrowRight', 'Size'), ('End', 'Bleed'), ('Home', 'Size'), ('ArrowRight', 'Quantity & sheet')]
+        keys = [('ArrowLeft', 'Bleed'), ('ArrowRight', 'Size'), ('End', 'Bleed'), ('Home', 'Size'), ('ArrowRight', 'Sheet')]
         tabs.get_by_role('tab', name='Size', exact=True).focus()
         for key, name in keys:
             self.page.keyboard.press(key)
@@ -508,6 +510,223 @@ class Suite:
         expect(menu).not_to_have_attribute('open', '')
         self.page.screenshot(path=str(self.out/'setup-tabs.png'))
         self.checks.append('setup tabs: immediate out-of-order access, incomplete drafts retained, Continue unrestricted, export validated, arrow/Home/End keyboard navigation, Artwork button keyboard activation and fitting')
+
+    def setup_geometry(self):
+        self.fresh()
+        self.impose(stripe)
+        self.page.wait_for_function("!document.querySelector('.elm-shell').hasAttribute('data-workspace-animating')")
+        for width, height in [(1366, 900), (1366, 560), (800, 900), (390, 700), (320, 568)]:
+            self.page.set_viewport_size({'width': width, 'height': height})
+            if width <= 1100:
+                self.page.get_by_role('tab', name='Setup', exact=True).click()
+            self.step('Size')
+            self.page.wait_for_timeout(80)
+            # Sample actual rendered frames: a settled-only check misses snaps
+            # caused by focus scrolling or an extra footer on the final tab.
+            frames = self.page.evaluate('''() => new Promise(resolve => {
+              const bounds = selector => {
+                const r = document.querySelector(selector).getBoundingClientRect();
+                return {x:r.x, y:r.y, width:r.width, height:r.height};
+              };
+              const snapshot = () => ({
+                header:bounds('.app-header'), card:bounds('.ready-card'),
+                tabs:bounds('.setup-stepper'), fields:bounds('.gang-setup-fields'),
+                footer:bounds('.elm-setup-actions'),
+                action:bounds('.elm-setup-actions .primary-button'),
+                back:document.querySelector('.elm-setup-actions .ghost-button')?.getBoundingClientRect().x,
+                step:document.querySelector('.setup-stepper [aria-selected=true]').textContent,
+                scrollX, scrollY
+              });
+              const frames = [snapshot()];
+              const tabs = [...document.querySelectorAll('.setup-stepper [role=tab]')];
+              const targets = [1, 2, 3, 0, 3, 2, 1, 0];
+              let index = 0, tick = 0;
+              const sample = () => {
+                if (tick % 5 === 0 && index < targets.length) {
+                  const target = targets[index++];
+                  if (index <= 3) document.querySelector('.setup-continue-button').click();
+                  else if (index >= 6) document.querySelector('.setup-back-button').click();
+                  else tabs[target].click();
+                }
+                frames.push(snapshot());
+                if (++tick < targets.length * 5 + 5) requestAnimationFrame(sample);
+                else resolve(frames);
+              };
+              requestAnimationFrame(sample);
+            })''')
+            (self.out/f'setup-geometry-{width}x{height}.json').write_text(json.dumps(frames, indent=2))
+            first = frames[0]
+            assert {frame['step'] for frame in frames} == {'Size', 'Sheet', 'Arrangement', 'Bleed'}, (width, height, 'Steps did not all render')
+            for frame in frames:
+                footer, action = frame['footer'], frame['action']
+                assert abs(action['x'] + action['width'] - (footer['x'] + footer['width'] - 12)) < 1, (width, height, 'Primary action must stay right', frame)
+                if frame.get('back') is not None:
+                    assert abs(frame['back'] - footer['x'] - 12) < 1, (width, height, 'Back must stay left', frame)
+                for part in ['header', 'card', 'tabs', 'fields', 'footer']:
+                    assert all(abs(frame[part][key] - first[part][key]) < 1 for key in first[part]), (width, height, part, frames)
+                assert abs(action['y'] - first['action']['y']) < 1, (width, height, 'Action moves vertically', frames)
+                assert frame['scrollX'] == first['scrollX'] and frame['scrollY'] == first['scrollY'], (width, height, 'Focus scrolls the page', frames)
+            # Long content scrolls inside the rail without moving navigation.
+            self.page.get_by_text('Artwork files', exact=True).click()
+            self.page.locator('.gang-setup-fields').evaluate('e => e.scrollTop = e.scrollHeight')
+            footer = self.page.locator('.elm-setup-actions').bounding_box()
+            assert abs(footer['y'] - first['footer']['y']) < 1
+            self.button('Continue').click()
+            assert self.page.get_by_role('heading', name='Quantity and sheet', exact=True).evaluate('''e => {
+              const r = e.getBoundingClientRect(), region = e.closest('.gang-setup-fields').getBoundingClientRect();
+              return r.y >= region.y && r.bottom <= region.bottom;
+            }'''), (width, height, 'New step retained the previous scroll position')
+            self.step('Bleed')
+            self.page.get_by_text('Saved work', exact=True).click()
+            self.page.locator('.gang-setup-fields').evaluate('e => e.scrollTop = e.scrollHeight')
+            footer = self.page.locator('.elm-setup-actions').bounding_box()
+            assert abs(footer['y'] - first['footer']['y']) < 1, (width, height, 'Saved work moves the footer')
+            action = self.button('Download imposed PDF')
+            assert action.evaluate('''e => {
+              const r = e.getBoundingClientRect();
+              return r.y >= 0 && r.bottom <= innerHeight && e.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2));
+            }'''), (width, height, 'Final action is clipped')
+            self.page.screenshot(path=str(self.out/f'setup-stable-{width}x{height}.png'))
+        self.page.set_viewport_size({'width': 1366, 'height': 900})
+        self.checks.append('setup geometry: primary action stays right, Back stays left, stable tabs/scroller/footer across all steps and rapid reversal, page focus and rail scrolling at desktop/short/tablet/390px/320px')
+
+    def artwork_first_open(self):
+        for width, height in [(1366, 900), (1366, 560), (800, 900), (390, 700), (320, 568)]:
+            self.page.set_viewport_size({'width': width, 'height': height})
+            # Each case starts a fresh workflow. Reopening an already-positioned
+            # popover hid the initial layout jump in the earlier browser audit.
+            self.fresh()
+            self.select(stripe)
+            self.idle()
+            self.switch('Impose artwork')
+            self.idle()
+            self.page.wait_for_function("!document.querySelector('.elm-shell').hasAttribute('data-workspace-animating')")
+            frames = self.page.locator('.elm-artwork-menu > summary').evaluate('''trigger => new Promise(resolve => {
+              const bounds = selector => {
+                const element = document.querySelector(selector);
+                if (!element || !element.getClientRects().length) return null;
+                const r = element.getBoundingClientRect();
+                return {x:r.x, y:r.y, width:r.width, height:r.height};
+              };
+              const snapshot = () => ({
+                toolbar:bounds('.elm-toolbar'), trigger:bounds('.elm-artwork-menu > summary'),
+                setup:bounds('.elm-setup'), preview:bounds('.elm-preview-region'),
+                panel:bounds('.elm-artwork-menu > fieldset'), scrollX, scrollY
+              });
+              const frames = [snapshot()], start = performance.now();
+              trigger.click();
+              frames.push(snapshot());
+              const sample = now => {
+                frames.push(snapshot());
+                if (now - start < 250) requestAnimationFrame(sample);
+                else resolve(frames);
+              };
+              requestAnimationFrame(sample);
+            })''')
+            (self.out/f'artwork-first-open-{width}x{height}.json').write_text(json.dumps(frames, indent=2))
+            first, settled = frames[0], frames[-1]
+            for frame in frames:
+                for part in ['toolbar', 'trigger', 'setup', 'preview']:
+                    if first[part] is not None:
+                        assert frame[part] is not None and all(abs(frame[part][key] - first[part][key]) < 1 for key in first[part]), (width, height, part, frames)
+                if frame['panel'] is not None:
+                    assert all(abs(frame['panel'][key] - settled['panel'][key]) < 1 for key in frame['panel']), (width, height, 'Artwork panel shifts after first open', frames)
+                assert frame['scrollX'] == first['scrollX'] and frame['scrollY'] == first['scrollY'], (width, height, 'Artwork scrolls the page', frames)
+            panel = settled['panel']
+            assert panel and panel['x'] >= 0 and panel['x'] + panel['width'] <= width and panel['y'] + panel['height'] <= height, (width, height, panel)
+            self.page.screenshot(path=str(self.out/f'artwork-first-open-{width}x{height}.png'))
+            self.close_artwork()
+        self.page.set_viewport_size({'width': 1366, 'height': 900})
+        self.checks.append('Artwork first open: fresh workflows at desktop/short/tablet/mobile sizes, stable popover/trigger/toolbar/workspace bounds and page scroll from the first rendered layout')
+
+    def preview_toolbar(self):
+        self.fresh()
+        self.impose(stripe)
+        self.button('Repeat pages').click()
+        self.step('Sheet')
+        self.page.get_by_label('Copies', exact=True).fill('61')
+        self.idle()
+        toolbar = self.page.locator('.elm-toolbar')
+        expect(toolbar.locator('.elm-preview-guides')).to_have_count(0)
+        for name in ['Cut lines', 'Cut paths', 'Bleed lines', 'Gutters']:
+            expect(self.page.get_by_role('checkbox', name=name, exact=True)).to_have_count(0)
+        expect(self.page.locator('.piece-cut')).to_have_count(0)
+        expect(self.page.locator('.piece-bleed')).to_have_count(0)
+        # Every cut edge has one sheet-spanning path, above all artwork.
+        def assert_paths():
+            self.page.locator('.sheet-svg').evaluate('''svg => {
+          const cuts = [...svg.querySelectorAll('.piece-hit-area')];
+          const paths = [...svg.querySelectorAll('.piece-cut-path')];
+          const horizontal = [...new Set(cuts.flatMap(r => [+r.getAttribute('y'), +r.getAttribute('y') + +r.getAttribute('height')]))];
+          const vertical = [...new Set(cuts.flatMap(r => [+r.getAttribute('x'), +r.getAttribute('x') + +r.getAttribute('width')]))];
+          if (paths.length !== horizontal.length + vertical.length) throw new Error('Duplicated or missing cut paths');
+          for (const y of horizontal) if (!paths.some(p => +p.getAttribute('y1') === y && +p.getAttribute('y2') === y)) throw new Error('Missing horizontal cut');
+          for (const x of vertical) if (!paths.some(p => +p.getAttribute('x1') === x && +p.getAttribute('x2') === x)) throw new Error('Missing vertical cut');
+          if (svg.lastElementChild.classList.value !== 'sheet-guides') throw new Error('Guides can be covered by artwork');
+            }''')
+        assert_paths()
+        for width, height in [(1366, 900), (1101, 768), (800, 900), (620, 700), (540, 700), (390, 700), (320, 568)]:
+            self.page.set_viewport_size({'width': width, 'height': height})
+            if width <= 1100:
+                self.page.get_by_role('tab', name='Preview', exact=True).click()
+            self.page.wait_for_timeout(80)
+            expect(self.page.get_by_text('Preview options', exact=True)).to_have_count(0)
+            geometry = toolbar.evaluate('''e => {
+              const r = e.getBoundingClientRect(), previous = e.querySelector('.previous').getBoundingClientRect(), next = e.querySelector('.next').getBoundingClientRect();
+              return {x:r.x, y:r.y, width:r.width, height:r.height,
+                rightAligned:Math.abs(next.right - (r.left + Math.max(e.clientWidth,e.scrollWidth) - e.scrollLeft - parseFloat(getComputedStyle(e).paddingRight))) < 2,
+                oneRow:[...e.querySelectorAll('summary, .preview-zoom-controls button, .sheet-nav-status, .sheet-nav-button')].every(control => Math.abs(control.getBoundingClientRect().top + control.getBoundingClientRect().height/2 - (previous.top+previous.height/2)) < 2),
+                adjacent:Math.abs(previous.top - next.top) < 1 && previous.right <= next.left};
+            }''')
+            assert geometry['rightAligned'] and geometry['adjacent'] and geometry['oneRow'], (width, height, geometry)
+            assert_paths()
+            before = toolbar.bounding_box()
+            self.button('Next sheet').click()
+            self.idle()
+            expect(self.page.locator('.sheet-nav-status')).to_contain_text('Sheet 2 of')
+            expect(self.button('Previous sheet')).to_be_enabled()
+            assert_paths()
+            self.button('Previous sheet').click()
+            self.idle()
+            expect(self.page.locator('.sheet-nav-status')).to_contain_text('Sheet 1 of')
+            expect(self.button('Previous sheet')).to_be_disabled()
+            assert_paths()
+            after = toolbar.bounding_box()
+            assert all(abs(after[key] - before[key]) < 1 for key in before), (width, height, 'Sheet navigation moves the toolbar')
+            self.button('Zoom in').click()
+            self.page.wait_for_function('new DOMMatrix(getComputedStyle(document.querySelector(".sheet-svg")).transform).a > 1')
+            style = self.page.locator('.piece-cut-path').first.evaluate('e => { const s=getComputedStyle(e); return {width:s.strokeWidth, vector:s.vectorEffect, dash:s.strokeDasharray}; }')
+            assert style == {'width':'1.5px', 'vector':'non-scaling-stroke', 'dash':'6px, 4px'}, style
+            assert_paths()
+            self.button('Fit sheet').click()
+            self.page.wait_for_function('new DOMMatrix(getComputedStyle(document.querySelector(".sheet-svg")).transform).a === 1')
+            self.button('Zoom out').click()
+            self.page.wait_for_function('new DOMMatrix(getComputedStyle(document.querySelector(".sheet-svg")).transform).a < 1')
+            self.button('Fit sheet').click()
+            self.page.screenshot(path=str(self.out/f'preview-toolbar-{width}x{height}.png'))
+        # The side toggle adds another toolbar control; keep setup usable on
+        # narrow screens as well as checking simplex navigation above.
+        self.page.set_viewport_size({'width': 1366, 'height': 900})
+        self.fresh()
+        self.impose([a_pdf, b_pdf])
+        self.step('Sheet')
+        self.page.get_by_label('Printing', exact=True).select_option('double')
+        self.idle()
+        for width, height in [(1366, 900), (390, 700), (320, 568)]:
+            self.page.set_viewport_size({'width': width, 'height': height})
+            if width <= 1100:
+                self.page.get_by_role('tab', name='Setup', exact=True).click()
+            self.button('Show back').click()
+            self.idle()
+            expect(self.button('Show front')).to_be_visible()
+            assert_paths()
+            self.button('Show front').click()
+            self.idle()
+            assert_paths()
+            assert self.page.locator('.gang-setup-fields').bounding_box()['height'] > 60, (width, height, 'Duplex toolbar collapses setup')
+            self.page.screenshot(path=str(self.out/f'preview-duplex-toolbar-{width}x{height}.png'))
+        self.page.set_viewport_size({'width': 1366, 'height': 900})
+        self.checks.append('preview toolbar: always-visible cut paths without guide toggles or cut lines, stable single-row navigation, complete paths across sheets/zoom/duplex at desktop/tablet/mobile/breakpoints')
 
     def fitting(self):
         self.fresh()
@@ -555,7 +774,7 @@ class Suite:
                     assert menu.get_by_text('Crop position',exact=True).count() == 0
                     self.close_artwork()
                 # SVG cut dimensions come from the same authoritative Rust plan.
-                svg=self.page.locator('.sheet-svg .piece-cut').first
+                svg=self.page.locator('.sheet-svg .piece-hit-area').first
                 assert abs(float(svg.get_attribute('width')) - cut['finishedWidth']) < .001
                 assert abs(float(svg.get_attribute('height')) - cut['finishedHeight']) < .001
         menu=self.artwork()
@@ -597,7 +816,7 @@ class Suite:
         assert all(size <= 4 for size in self.batch_sizes) and 4 in self.batch_sizes
         assert len(self.layouts[-1]['pagePlans']) == 6
         self.button('Repeat pages').click()
-        self.continue_to('Quantity & sheet')
+        self.continue_to('Sheet')
         self.button('Edit copy quantities').click()
         self.page.locator('#bulk-copy-quantity').fill('-1')
         expect(self.button('Apply to all')).to_be_disabled()
@@ -686,7 +905,7 @@ class Suite:
         menu.get_by_role('button',name='Use shared settings for this artwork',exact=True).click()
         self.idle()
         self.close_artwork()
-        self.step('Quantity & sheet')
+        self.step('Sheet')
         self.page.get_by_label('Printing',exact=True).select_option('double')
         self.idle()
         self.step('Arrangement')
@@ -724,6 +943,205 @@ class Suite:
         self.page.locator('.elm-saved li').filter(has_text=name).get_by_role('button',name='Delete',exact=True).click()
         expect(self.page.locator('.elm-saved li').filter(has_text=name)).to_have_count(0)
         self.checks.append('mixed/saved: four-page batch bound, distinct geometry/per-artwork overrides, zero/bulk/individual copies, simplex/duplex drafts + exported fronts/backs, manual grid/margins, preset CRUD/repair/retention, recent restore/delete, history restore/delete and stored download')
+
+    def impression_selection(self):
+        self.fresh()
+        food = pathlib.Path(__file__).resolve().parents[1] / 'pdf_examples' / 'before' / 'resize_food_menu.pdf'
+        self.impose(food)
+        self.page.locator('#finished-width').fill('8.5')
+        self.page.locator('#finished-height').fill('11')
+        self.button('Repeat pages').click()
+        self.step('Sheet')
+        self.page.get_by_label('Copies',exact=True).fill('2')
+        self.idle()
+        first = self.page.locator('#sheet-item-0')
+        second = self.page.locator('#sheet-item-1')
+        selection = self.page.locator('.piece-selection')
+        expect(selection).to_have_count(0)
+        second.locator('.piece-hit-area').click()
+        expect(second).to_have_attribute('data-selected','true')
+        expect(first).to_have_attribute('data-selected','false')
+        expect(selection).to_have_attribute('data-impression-index','1')
+        first.focus()
+        expect(first).to_have_attribute('data-selected','true')
+        expect(second).to_have_attribute('data-selected','false')
+        expect(selection).to_have_attribute('data-impression-index','0')
+        second.locator('.piece-hit-area').click(button='right')
+        menu = self.page.locator('#artwork-context-menu')
+        expect(menu).to_be_visible()
+        expect(selection).to_have_count(1)
+        expect(selection).to_have_attribute('data-impression-index','1')
+        self.page.screenshot(path=str(self.out/'impression-selection-menu.png'))
+        menu.get_by_role('menuitem',name='Rotate clockwise 90°',exact=True).press('Escape')
+        expect(second).to_be_focused()
+        for zoom in [1,2]:
+            if zoom == 2:
+                self.button('Zoom in').click()
+            style = selection.evaluate('''e => {
+              const item = document.querySelector('.sheet-item[data-selected=true]');
+              const hit = item.querySelector('.piece-hit-area'), style = getComputedStyle(e);
+              for (const key of ['x','y','width','height']) if (hit.getAttribute(key) !== e.getAttribute(key)) throw new Error('Selection does not match selected cut');
+              return {outline:getComputedStyle(item).outlineStyle, stroke:style.strokeWidth, effect:style.vectorEffect, color:style.stroke, dash:style.strokeDasharray};
+            }''')
+            assert style == {'outline':'none','stroke':'2.5px','effect':'non-scaling-stroke','color':'rgb(0, 111, 230)','dash':'none'}, style
+            expect(selection).to_have_count(1)
+            expect(self.page.locator('.piece-selection-halo')).to_have_count(1)
+            assert self.page.locator('.sheet-item[data-selected=true]').count() == 1
+            self.page.screenshot(path=str(self.out/f'impression-selection-zoom-{zoom}.png'))
+        self.button('Fit sheet').click()
+        self.page.get_by_role('switch',name='Dark mode').click()
+        second.focus()
+        self.page.screenshot(path=str(self.out/'impression-selection-light.png'))
+        self.page.get_by_role('switch',name='Dark mode').click()
+        self.checks.append('impression selection: one selected repeated copy, pointer/keyboard/open context menu and focus return, clear blue 2.5px outline with white border, exact cut geometry at zoom, no native SVG focus ring, light/dark screenshots')
+
+    def artwork_rotation(self):
+        artwork = fitz.open()
+        for width, height in [(216, 144), (144, 216)]:
+            page = artwork.new_page(width=width, height=height)
+            for x, y, color in [(0,0,(1,0,0)), (1,0,(0,1,0)), (0,1,(0,0,1)), (1,1,(1,1,0))]:
+                page.draw_rect(fitz.Rect(x*width/2,y*height/2,(x+1)*width/2,(y+1)*height/2),color=None,fill=color)
+        fixture = fixtures / 'rotation-quadrants.pdf'
+        artwork.save(fixture)
+        artwork.close()
+        self.fresh()
+        self.impose(fixture)
+        controls = self.artwork()
+        controls.get_by_label('Impression orientation',exact=True).select_option('upright')
+        self.button('Fill').click()
+        self.idle()
+        self.close_artwork()
+        self.continue_to('Bleed')
+        assert self.page.locator('.elm-preview-summary').count() == 0
+        assert self.page.get_by_text('pieces per sheet',exact=False).count() == 0
+        target = self.page.locator('.sheet-item[data-artwork-page="2"]')
+        hit = target.locator('.piece-hit-area')
+        menu = self.page.locator('#artwork-context-menu')
+        def open_menu():
+            hit.click(button='right')
+            expect(menu).to_be_visible()
+            expect(menu).to_have_attribute('aria-label','Page 2 artwork actions')
+        open_menu()
+        expect(menu.get_by_role('menuitem',name='Reset rotation',exact=True)).to_be_disabled()
+        menu.get_by_role('menuitem',name='Rotate clockwise 90°',exact=True).press('ArrowDown')
+        expect(menu.get_by_role('menuitem',name='Rotate counterclockwise 90°',exact=True)).to_be_focused()
+        menu.get_by_role('menuitem',name='Rotate counterclockwise 90°',exact=True).press('Escape')
+        expect(menu).to_be_hidden()
+        expect(target).to_be_focused()
+        target.press('Shift+F10')
+        expect(menu).to_be_visible()
+        menu.get_by_role('menuitem',name='Rotate clockwise 90°',exact=True).click()
+        self.idle()
+        layout = self.layouts[-1]
+        assert [plan['rotationDegrees'] for plan in layout['pagePlans']] == [0,90]
+        assert all(plan['finishedCutSize']=={'width':3,'height':2} for plan in layout['pagePlans'])
+        # Independently sample screen and PDF quadrants, including asymmetric
+        # rotation direction, source fitting, and an unchanged neighboring page.
+        colors = {'red':(255,0,0),'green':(0,255,0),'blue':(0,0,255),'yellow':(255,255,0)}
+        expected = {0:['red','green','blue','yellow'],90:['blue','red','yellow','green'],180:['yellow','blue','green','red'],270:['green','yellow','red','blue']}
+        for rotation in [90,180,270,0]:
+            if rotation != 90:
+                open_menu()
+                menu.get_by_role('menuitem',name='Rotate clockwise 90°',exact=True).click()
+                self.idle()
+            layout = self.layouts[-1]
+            assert [p['rotationDegrees'] for p in layout['pagePlans']] == [0,rotation]
+            path = self.download('Download imposed PDF',f'artwork-rotation-{rotation}.pdf')
+            screen = Image.open(io.BytesIO(self.page.screenshot())).convert('RGB')
+            with fitz.open(path) as document:
+                sheet = document[0]
+                pix = sheet.get_pixmap(matrix=fitz.Matrix(1,1),alpha=False)
+                raster = Image.frombytes('RGB',(pix.width,pix.height),pix.samples)
+                for index in [0,1]:
+                    bounds = self.page.locator(f'.sheet-item[data-artwork-page="{index+1}"] .piece-hit-area').bounding_box()
+                    placement = layout['placements'][index]
+                    names = expected[rotation if index == 1 else 0]
+                    for (x,y),name in zip([(0.25,0.25),(0.75,0.25),(0.25,0.75),(0.75,0.75)],names):
+                        pdf_pixel = raster.getpixel((round((placement['finishedX']+x*3)*72),round((placement['finishedY']+y*2)*72)))
+                        screen_pixel = screen.getpixel((round(bounds['x']+bounds['width']*x),round(bounds['y']+bounds['height']*y)))
+                        assert max(abs(a-b) for a,b in zip(pdf_pixel,colors[name]))<12,(rotation,index,pdf_pixel,name)
+                        assert max(abs(a-b) for a,b in zip(screen_pixel,colors[name]))<25,(rotation,index,screen_pixel,name)
+        open_menu()
+        menu.get_by_role('menuitem',name='Rotate 180°',exact=True).click()
+        self.idle()
+        open_menu()
+        menu.get_by_role('menuitem',name='Reset rotation',exact=True).click()
+        self.idle()
+        assert self.layouts[-1]['pagePlans'][1]['rotationDegrees'] == 0
+        controls = self.artwork()
+        controls.get_by_label('Selected artwork rotation',exact=True).focus()
+        controls.get_by_label('Selected artwork rotation',exact=True).select_option('270')
+        self.idle()
+        expect(controls.get_by_label('Selected artwork rotation',exact=True)).to_be_focused()
+        assert self.layouts[-1]['pagePlans'][1]['rotationDegrees'] == 270
+        self.close_artwork()
+        for width,height in [(1366,768),(800,900),(390,700)]:
+            self.page.set_viewport_size({'width':width,'height':height})
+            if width <= 1100:
+                self.page.get_by_role('tab',name='Preview',exact=True).click()
+            target.scroll_into_view_if_needed()
+            target.focus()
+            target.press('Enter')
+            expect(menu).to_be_visible()
+            bounds = menu.bounding_box()
+            assert bounds['x']>=0 and bounds['y']>=0 and bounds['x']+bounds['width']<=width and bounds['y']+bounds['height']<=height,bounds
+            menu.get_by_role('menuitem',name='Rotate clockwise 90°',exact=True).press('Escape')
+            expect(target).to_be_focused()
+            hit.click(button='right')
+            expect(menu).to_be_visible()
+            self.page.locator('.sheet-paper').click(position={'x':2,'y':2})
+            expect(menu).to_be_hidden()
+        self.page.set_viewport_size({'width':1366,'height':900})
+        # The shop's real portrait and landscape originals share one 8.5x11
+        # finished cut and the existing two-up 12x18 sheet after page rotation.
+        examples = pathlib.Path(__file__).resolve().parents[1] / 'pdf_examples' / 'before'
+        food = examples / 'resize_food_menu.pdf'
+        wine = examples / 'resize_wine_menu.pdf'
+        self.fresh()
+        self.impose([food,wine])
+        self.page.locator('#finished-width').fill('8.5')
+        self.page.locator('#finished-height').fill('11')
+        self.idle()
+        hit = self.page.locator('.sheet-item[data-artwork-page="2"] .piece-hit-area')
+        open_menu()
+        menu.get_by_role('menuitem',name='Rotate clockwise 90°',exact=True).click()
+        self.idle()
+        layout = self.layouts[-1]
+        assert layout['piecesPerSheet'] == 2 and layout['sheetsRequired'] == 1
+        assert layout['rotationDegrees'] == 90
+        assert [p['rotationDegrees'] for p in layout['pagePlans']] == [0,90]
+        assert all(abs(p['artwork']['width']-8.75)<0.001 and abs(p['artwork']['height']-11.25)<0.001 for p in layout['pagePlans'])
+        self.continue_to('Bleed')
+        path = self.download('Download imposed PDF','mixed-food-wine.pdf')
+        with fitz.open(path) as result:
+            assert len(result) == 1
+            actual = [word[4] for word in result[0].get_text('words')]
+            wanted = []
+            for original in [food,wine]:
+                with fitz.open(original) as source:
+                    wanted.extend(word[4] for word in source[0].get_text('words'))
+            assert sorted(actual) == sorted(wanted), (len(actual),len(wanted))
+        open_menu()
+        self.page.screenshot(path=str(self.out/'mixed-artwork-context-menu.png'))
+        menu.get_by_role('menuitem',name='Rotate clockwise 90°',exact=True).press('Escape')
+        saved = self.context.request.get(args.url+'/gang-up/export-history').json()
+        assert saved[0]['request']['pageOverrides'][0]['rotationDegrees'] == 90
+        self.step('Size')
+        self.button('Repeat pages').click()
+        self.step('Sheet')
+        self.button('Edit copy quantities').click()
+        self.page.locator('#bulk-copy-quantity').fill('2')
+        self.button('Apply to all').click()
+        self.idle()
+        layout = self.layouts[-1]
+        assert layout['impressionQuantities'] == [2,2] and layout['sheetsRequired'] == 2
+        self.continue_to('Bleed')
+        repeated = self.download('Download imposed PDF','mixed-food-wine-repeated.pdf')
+        with fitz.open(repeated) as result:
+            assert len(result) == 2
+            actual = [word[4] for page in result for word in page.get_text('words')]
+            assert sorted(actual) == sorted(wanted*2)
+        self.checks.append('artwork rotation: independent mixed orientations, 0/90/180/270 screen/PDF quadrant parity, reset, inspector equivalent, keyboard menu/focus, outside dismissal, bounded desktop/tablet/mobile menu, no canvas count strip')
 
     def preview_recovery(self):
         self.fresh()
@@ -865,7 +1283,56 @@ class Suite:
         frame = self.page.locator('.ready-card.imposing').bounding_box()
         assert abs(frame['x']) < 1 and abs(frame['width'] - 1366) < 1, frame
         self.page.emulate_media(reduced_motion='no-preference')
-        self.checks.append('workspace animation: visible monotonic expansion without overshoot, full viewport bounds, return to centered tool, reduced-motion bypass')
+        # Shrinking used to measure the header after changing its grid alignment,
+        # animate to an intrinsic width, then snap back when animation ended.
+        self.fresh()
+        self.select(three)
+        for width, height in [(1366, 900), (1366, 768), (800, 900)]:
+            self.page.set_viewport_size({'width': width, 'height': height})
+            for target in ['PDF to images', 'Extract pages']:
+                self.switch('Impose artwork')
+                self.idle()
+                self.page.wait_for_function("!document.querySelector('.elm-shell').hasAttribute('data-workspace-animating')")
+                frames = self.button(target).evaluate('''button => new Promise(resolve => {
+                  const bounds = selector => {
+                    const element = document.querySelector(selector);
+                    if (!element) return null;
+                    const r = element.getBoundingClientRect();
+                    return {x:r.x, y:r.y, width:r.width, height:r.height};
+                  };
+                  const snapshot = () => ({header:bounds('.app-header'), card:bounds('.ready-card'), action:bounds('.submit-row')});
+                  const frames = [snapshot()], start = performance.now();
+                  button.click();
+                  const sample = now => {
+                    frames.push(snapshot());
+                    if (now - start < 800) requestAnimationFrame(sample);
+                    else resolve(frames);
+                  };
+                  requestAnimationFrame(sample);
+                })''')
+                (self.out/f'return-{target.replace(" ", "-")}-{width}x{height}.json').write_text(json.dumps(frames, indent=2))
+                for part in ['header', 'card', 'action']:
+                    measured = [frame[part] for frame in frames if frame[part] is not None]
+                    assert measured, (part, frames)
+                    first, last = measured[0], measured[-1]
+                    for key in ['x', 'y', 'width', 'height']:
+                        low, high = sorted([first[key], last[key]])
+                        assert all(low - 1 <= frame[key] <= high + 1 for frame in measured), (part, key, frames)
+                    # The final animation frames and removal must converge;
+                    # no late correction is allowed after reaching the target.
+                    assert all(abs(frame[key] - last[key]) < 1 for frame in measured[-10:] for key in last), (part, frames[-10:])
+                assert abs(frames[-1]['header']['width'] - frames[-1]['card']['width']) < 1
+                assert abs(frames[-1]['card']['x'] - (width - frames[-1]['card']['width']) / 2) < 1
+            # Reverse while expanding; the departed workspace must stay gone.
+            self.switch('Impose artwork')
+            self.page.wait_for_timeout(100)
+            self.switch('PDF to images')
+            self.idle()
+            self.page.wait_for_function("!document.querySelector('.elm-shell').hasAttribute('data-workspace-animating')")
+            assert self.page.locator('.ready-card.imposing').count() == 0
+            expect(self.button('Download images')).to_be_visible()
+        self.page.set_viewport_size({'width': 1366, 'height': 900})
+        self.checks.append('workspace animation: monotonic expansion and PDF-to-images/extraction return, header/card/action bounds without overshoot or late snap at desktop/laptop/half-screen sizes, rapid reversal, reduced-motion bypass')
 
     def responsive(self):
         self.fresh()

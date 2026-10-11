@@ -1,4 +1,4 @@
-module Imposition exposing (applyPreset, bindSource, detectedFinishedSize, initial, pageNumber, pagesForSheet, quantities, setMode, setSides, summary)
+module Imposition exposing (applyPreset, artworkRotation, bindSource, detectedFinishedSize, initial, pageNumber, pagesForSheet, quantities, setMode, setSides, summary)
 
 import Api.Generated as A
 
@@ -28,6 +28,14 @@ initial =
     , gutter = { horizontal = 0.299, vertical = 0.299 }
     , manual = Nothing
     }
+
+
+artworkRotation : Int -> A.LayoutRequest -> Int
+artworkRotation page r =
+    List.filter (\p -> p.pageNumber == page) r.pageOverrides
+        |> List.head
+        |> Maybe.map .rotationDegrees
+        |> Maybe.withDefault 0
 
 
 detectedFinishedSize : A.PdfAnalysis -> A.SizeInches

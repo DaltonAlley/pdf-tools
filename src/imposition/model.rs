@@ -101,6 +101,8 @@ pub(crate) struct SourcePage {
 pub(crate) struct PageOverride {
     pub page_number: usize,
     #[serde(default)]
+    pub rotation_degrees: u16,
+    #[serde(default)]
     pub finished_cut_size: Option<SizeInches>,
     #[serde(default)]
     pub artwork_fit: Option<ArtworkFit>,
@@ -118,6 +120,7 @@ pub(crate) struct PlanRect {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct PagePlan {
+    pub rotation_degrees: u16,
     pub position_travel: CropPosition,
     pub page_number: usize,
     pub source_pdf_size: SizeInches,

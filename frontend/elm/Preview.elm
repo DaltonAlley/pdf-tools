@@ -4,9 +4,10 @@ import Api.Generated as A
 import Dict
 import Html exposing (Html, button, div, p, text)
 import Html.Attributes as H
-import Html.Events exposing (onClick)
+import Html.Events exposing (onClick, onFocus)
 import Imposition as I
 import Model exposing (..)
+import Set
 import Svg as S
 import Svg.Attributes as SA
 
@@ -18,7 +19,12 @@ f =
 
 rect : String -> A.PlanRect -> List (S.Attribute Msg)
 rect cls r =
-    [ SA.class cls, SA.x (f r.x), SA.y (f r.y), SA.width (f r.width), SA.height (f r.height) ]
+    SA.class cls :: rectGeometry r
+
+
+rectGeometry : A.PlanRect -> List (S.Attribute Msg)
+rectGeometry r =
+    [ SA.x (f r.x), SA.y (f r.y), SA.width (f r.width), SA.height (f r.height) ]
 
 
 view : Model -> Html Msg
@@ -38,8 +44,10 @@ view m =
                             sheet =
                                 l.parentSheetSize
                         in
-                        S.svg [ SA.class "sheet-svg", SA.viewBox ("-0.3 -0.3 " ++ f (sheet.width + 0.6) ++ " " ++ f (sheet.height + 0.6)), SA.style ("transform: scale(" ++ f m.zoom ++ "); transform-origin:center;"), H.attribute "role" "img", H.attribute "aria-label" "Production sheet" ]
-                            (S.rect [ SA.class "sheet-paper", SA.x "0", SA.y "0", SA.width (f sheet.width), SA.height (f sheet.height), SA.fill "white" ] [] :: List.map (placement m display) l.placements)
+                        S.svg [ SA.class "sheet-svg", SA.viewBox ("-0.3 -0.3 " ++ f (sheet.width + 0.6) ++ " " ++ f (sheet.height + 0.6)), SA.style ("transform: scale(" ++ f m.zoom ++ "); transform-origin:center;"), H.attribute "role" "group", H.attribute "aria-label" "Production sheet" ]
+                            (S.rect [ SA.class "sheet-paper", SA.x "0", SA.y "0", SA.width (f sheet.width), SA.height (f sheet.height), SA.fill "white" ] []
+                                :: (List.map (placement m display) l.placements ++ [ guides m display ])
+                            )
                 , if m.previewLoading then
                     p [ H.class "preview-cache-status", H.attribute "role" "status" ] [ text "Updating preview…" ]
 
@@ -52,17 +60,134 @@ view m =
                     text ""
                 ]
             ]
-        , case m.layout of
-            Nothing ->
-                text ""
-
-            Just l ->
-                div [ H.class "elm-preview-summary" ] [ p [] [ text (String.fromInt l.piecesPerSheet ++ " pieces per sheet · " ++ String.fromInt l.sheetsRequired ++ " sheets · " ++ String.fromInt l.totalPiecesProduced ++ " pieces produced · " ++ String.fromInt l.extraPiecesProduced ++ " extra") ], div [] (List.map (\w -> p [ H.class "field-help" ] [ text (w.problem ++ " " ++ w.impact ++ " " ++ w.fix) ]) l.warnings) ]
+        , artworkMenu m
         ]
 
 
-placement : Model -> Display -> A.PiecePlacement -> Html Msg
-placement m display item =
+artworkMenu : Model -> Html Msg
+artworkMenu m =
+    let
+        page =
+            Maybe.withDefault m.selectedPage m.artworkMenu
+
+        rotation =
+            I.artworkRotation page m.request
+
+        action label value =
+            button [ H.type_ "button", H.attribute "role" "menuitem", H.disabled (m.busy || (value == rotation)), onClick (RotateArtwork page value) ] [ text label ]
+    in
+    div [ H.id "artwork-context-menu", H.class "artwork-context-menu", H.attribute "popover" "auto", H.attribute "role" "menu", H.attribute "aria-label" ("Page " ++ String.fromInt page ++ " artwork actions") ]
+        [ p [ H.class "artwork-context-heading", H.attribute "role" "presentation" ] [ text ("Page " ++ String.fromInt page ++ " · " ++ String.fromInt rotation ++ "°") ]
+        , action "Rotate clockwise 90°" (modBy 360 (rotation + 90))
+        , action "Rotate counterclockwise 90°" (modBy 360 (rotation + 270))
+        , action "Rotate 180°" (modBy 360 (rotation + 180))
+        , action "Reset rotation" 0
+        , p [ H.class "field-help", H.attribute "role" "presentation" ] [ text "Applies to all copies of this page." ]
+        ]
+
+
+sourceImage : Maybe A.PagePlan -> A.PlanRect -> ( A.PlanRect, String )
+sourceImage plan artwork =
+    let
+        rotation =
+            Maybe.map .rotationDegrees plan |> Maybe.withDefault 0
+
+        quarterTurn =
+            modBy 180 rotation == 90
+
+        width =
+            if quarterTurn then
+                artwork.height
+
+            else
+                artwork.width
+
+        height =
+            if quarterTurn then
+                artwork.width
+
+            else
+                artwork.height
+
+        cx =
+            artwork.x + artwork.width / 2
+
+        cy =
+            artwork.y + artwork.height / 2
+
+        full =
+            { x = cx - width / 2, y = cy - height / 2, width = width, height = height }
+
+        image =
+            case Maybe.andThen .previewBox plan of
+                Nothing ->
+                    full
+
+                Just box ->
+                    let
+                        source =
+                            Maybe.map .sourcePdfSize plan |> Maybe.withDefault { width = width, height = height }
+
+                        sx =
+                            width / source.width
+
+                        sy =
+                            height / source.height
+                    in
+                    { x = full.x + box.left * sx, y = full.y + (source.height - box.top) * sy, width = box.width * sx, height = box.height * sy }
+    in
+    ( image, "rotate(" ++ String.fromInt rotation ++ " " ++ f cx ++ " " ++ f cy ++ ")" )
+
+
+guides : Model -> Display -> Html Msg
+guides m display =
+    let
+        sheet =
+            display.layout.parentSheetSize
+
+        cuts =
+            display.layout.placements
+                |> List.filter (\item -> I.pageNumber display.layout display.sheet display.back item.index /= Nothing)
+                |> List.map (finishedCut display)
+
+        unique =
+            Set.fromList >> Set.toList
+
+        horizontal =
+            cuts
+                |> List.concatMap (\cut -> [ cut.y, cut.y + cut.height ])
+                |> unique
+                |> List.map (\y -> [ SA.x1 "0", SA.x2 (f sheet.width), SA.y1 (f y), SA.y2 (f y) ])
+
+        vertical =
+            cuts
+                |> List.concatMap (\cut -> [ cut.x, cut.x + cut.width ])
+                |> unique
+                |> List.map (\x -> [ SA.x1 (f x), SA.x2 (f x), SA.y1 "0", SA.y2 (f sheet.height) ])
+
+        selected =
+            display.layout.placements
+                |> List.filter (\item -> m.selectedImpression == Just item.index && I.pageNumber display.layout display.sheet display.back item.index /= Nothing)
+                |> List.concatMap
+                    (\item ->
+                        [ S.rect (rect "piece-selection-halo preview-guide" (finishedCut display item)) []
+                        , S.rect (rect "piece-selection preview-guide" (finishedCut display item) ++ [ H.attribute "data-impression-index" (String.fromInt item.index) ]) []
+                        ]
+                    )
+
+        outlined shape cls attrs =
+            [ shape (SA.class "preview-guide preview-guide-halo" :: attrs) []
+            , shape (SA.class ("preview-guide " ++ cls) :: attrs) []
+            ]
+    in
+    S.g [ SA.class "sheet-guides", H.attribute "aria-hidden" "true" ]
+        (List.concatMap (outlined S.line "piece-cut-path") (horizontal ++ vertical)
+            ++ selected
+        )
+
+
+finishedCut : Display -> A.PiecePlacement -> A.PlanRect
+finishedCut display item =
     let
         l =
             display.layout
@@ -138,6 +263,30 @@ placement m display item =
                     else
                         cut0.y
             }
+    in
+    cut
+
+
+placement : Model -> Display -> A.PiecePlacement -> Html Msg
+placement m display item =
+    let
+        l =
+            display.layout
+
+        page =
+            I.pageNumber l display.sheet display.back item.index
+
+        plan =
+            page |> Maybe.andThen (\n -> List.filter (\p -> p.pageNumber == n) l.pagePlans |> List.head)
+
+        size =
+            Maybe.map .finishedCutSize plan |> Maybe.withDefault l.finishedCutSize
+
+        cut =
+            finishedCut display item
+
+        rotateBack =
+            display.back && (Maybe.map .rotateBack180 l.duplex |> Maybe.withDefault False)
 
         cx =
             cut.x + cut.width / 2
@@ -151,23 +300,8 @@ placement m display item =
         image0 =
             { x = cx - size.width / 2 + artwork.x, y = cy - size.height / 2 + artwork.y, width = artwork.width, height = artwork.height }
 
-        image =
-            case Maybe.andThen .previewBox plan of
-                Nothing ->
-                    image0
-
-                Just box ->
-                    let
-                        source =
-                            Maybe.map .sourcePdfSize plan |> Maybe.withDefault l.sourcePdfSize
-
-                        sx =
-                            image0.width / source.width
-
-                        sy =
-                            image0.height / source.height
-                    in
-                    { x = image0.x + box.left * sx, y = image0.y + (source.height - box.top) * sy, width = box.width * sx, height = box.height * sy }
+        ( image, sourceTransform ) =
+            sourceImage plan image0
 
         bleed =
             Maybe.map .bleedAmount plan |> Maybe.withDefault l.bleed.effectiveAmountPerSide
@@ -194,7 +328,32 @@ placement m display item =
         S.g [] []
 
     else
-        S.g []
+        S.g
+            [ H.id ("sheet-item-" ++ String.fromInt item.index)
+            , SA.class "sheet-item"
+            , H.attribute "data-impression-index" (String.fromInt item.index)
+            , H.attribute "data-selected"
+                (if m.selectedImpression == Just item.index then
+                    "true"
+
+                 else
+                    "false"
+                )
+            , onClick (SelectImpression item.index (Maybe.withDefault 1 page))
+            , onFocus (SelectImpression item.index (Maybe.withDefault 1 page))
+            , H.attribute "data-artwork-page" (String.fromInt (Maybe.withDefault 1 page))
+            , H.attribute "data-artwork-disabled"
+                (if m.busy || not m.layoutReady || m.previewLoading then
+                    "true"
+
+                 else
+                    "false"
+                )
+            , H.attribute "tabindex" "0"
+            , H.attribute "role" "button"
+            , H.attribute "aria-label" ("Page " ++ String.fromInt (Maybe.withDefault 1 page) ++ " artwork actions")
+            , H.attribute "aria-haspopup" "menu"
+            ]
             [ S.defs [] [ S.clipPath [ SA.id clipId ] [ S.rect (rect "" clip) [] ] ]
             , S.g [ SA.clipPath ("url(#" ++ clipId ++ ")") ]
                 [ case url of
@@ -202,28 +361,9 @@ placement m display item =
                         S.rect (rect "" cut ++ [ SA.fill "#eef1f2" ]) []
 
                     Just src ->
-                        S.image (rect "piece-artwork" image ++ [ SA.xlinkHref src, SA.preserveAspectRatio "none", SA.transform ("rotate(" ++ String.fromInt rotation ++ " " ++ f cx ++ " " ++ f cy ++ ")") ]) []
+                        S.g [ SA.transform ("rotate(" ++ String.fromInt rotation ++ " " ++ f cx ++ " " ++ f cy ++ ")") ] [ S.image (rect "piece-artwork" image ++ [ SA.xlinkHref src, SA.preserveAspectRatio "none", SA.transform sourceTransform ]) [] ]
                 ]
-            , if m.showBleed then
-                S.rect (rect "piece-bleed" clip ++ [ SA.fill "none", SA.stroke "#b54d78", SA.strokeWidth "0.008", SA.strokeDasharray "0.04 0.02" ]) []
-
-              else
-                S.g [] []
-            , if m.showCut then
-                S.rect (rect "piece-cut" cut ++ [ SA.fill "none", SA.stroke "#2d6f7f", SA.strokeWidth "0.012" ]) []
-
-              else
-                S.g [] []
-            , if m.showGutters then
-                S.rect [ SA.x (f item.x), SA.y (f item.y), SA.width (f item.width), SA.height (f item.height), SA.fill "none", SA.stroke "#b99845", SA.strokeWidth "0.015", SA.strokeDasharray "0.05" ] []
-
-              else
-                S.g [] []
-            , if m.showPaths then
-                S.g [] [ S.line [ SA.x1 "0", SA.x2 (f l.parentSheetSize.width), SA.y1 (f cut.y), SA.y2 (f cut.y), SA.stroke "#ba5545", SA.strokeWidth "0.008" ] [], S.line [ SA.x1 (f cut.x), SA.x2 (f cut.x), SA.y1 "0", SA.y2 (f l.parentSheetSize.height), SA.stroke "#ba5545", SA.strokeWidth "0.008" ] [] ]
-
-              else
-                S.g [] []
+            , S.rect (rect "piece-hit-area" cut ++ [ SA.fill "transparent", H.attribute "vector-effect" "non-scaling-stroke" ]) []
             ]
 
 
@@ -245,23 +385,8 @@ crop m fit =
         artwork0 =
             Maybe.map .artwork plan |> Maybe.withDefault { x = 0, y = 0, width = size.width, height = size.height }
 
-        artwork =
-            case plan |> Maybe.andThen .previewBox of
-                Nothing ->
-                    artwork0
-
-                Just box ->
-                    let
-                        source =
-                            Maybe.map .sourcePdfSize plan |> Maybe.withDefault m.request.sourcePdfSize
-
-                        sx =
-                            artwork0.width / source.width
-
-                        sy =
-                            artwork0.height / source.height
-                    in
-                    { x = artwork0.x + box.left * sx, y = artwork0.y + (source.height - box.top) * sy, width = box.width * sx, height = box.height * sy }
+        ( artwork, sourceTransform ) =
+            sourceImage plan artwork0
 
         travel =
             Maybe.map .positionTravel plan |> Maybe.withDefault { x = 0, y = 0 }
@@ -271,7 +396,7 @@ crop m fit =
             [ S.rect [ SA.width (f size.width), SA.height (f size.height), SA.fill "white" ] []
             , case url of
                 Just src ->
-                    S.image (rect "" artwork ++ [ SA.xlinkHref src, SA.preserveAspectRatio "none" ]) []
+                    S.image (rect "" artwork ++ [ SA.xlinkHref src, SA.preserveAspectRatio "none", SA.transform sourceTransform ]) []
 
                 Nothing ->
                     S.g [] []

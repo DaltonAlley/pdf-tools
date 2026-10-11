@@ -199,6 +199,7 @@ mod tests {
             position: CropPosition::default(),
         });
         stretch.request.page_overrides.push(PageOverride {
+            rotation_degrees: 270,
             page_number: 1,
             finished_cut_size: None,
             artwork_fit: stretch.request.artwork_fit,

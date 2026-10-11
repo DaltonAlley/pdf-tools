@@ -600,7 +600,7 @@ setupView m =
             m.request
 
         title =
-            List.drop m.step [ "Size", "Quantity & sheet", "Arrangement", "Bleed" ] |> List.head |> Maybe.withDefault "Size"
+            List.drop m.step [ "Size", "Sheet", "Arrangement", "Bleed" ] |> List.head |> Maybe.withDefault "Size"
 
         manual =
             Maybe.withDefault { rows = 1, columns = 1, rotationDegrees = 0, margins = Nothing } r.manual
@@ -779,60 +779,64 @@ setupView m =
 
                       else
                         text ""
+                    , div [ class "production-notes" ] (Maybe.map (.warnings >> List.map (\w -> p [ class "field-help" ] [ text (w.problem ++ " " ++ w.impact ++ " " ++ w.fix) ])) m.layout |> Maybe.withDefault [])
+                    , details [ class "elm-saved-footer" ] [ summary [] [ text "Saved work" ], savedView m ]
                     ]
     in
-    section [ id "gang-setup-panel", class "gang-panel gang-setup elm-setup", attribute "aria-label" "Print setup" ]
-        [ nav [ class "setup-stepper", attribute "aria-label" "Print setup" ]
-            [ ol [ attribute "role" "tablist", attribute "aria-label" "Print setup options" ]
-                (List.indexedMap
-                    (\i t ->
-                        li [ attribute "role" "presentation" ]
-                            [ button
-                                [ type_ "button"
-                                , id ("setup-tab-" ++ String.fromInt i)
-                                , attribute "role" "tab"
-                                , attribute "aria-controls" "setup-tab-panel"
-                                , attribute "aria-selected"
-                                    (if i == m.step then
-                                        "true"
+    Keyed.node "section"
+        [ id "gang-setup-panel", class "gang-panel gang-setup elm-setup", attribute "aria-label" "Print setup" ]
+        [ ( "tabs"
+          , nav [ class "setup-stepper", attribute "aria-label" "Print setup" ]
+                [ ol [ attribute "role" "tablist", attribute "aria-label" "Print setup options" ]
+                    (List.indexedMap
+                        (\i t ->
+                            li [ attribute "role" "presentation" ]
+                                [ button
+                                    [ type_ "button"
+                                    , id ("setup-tab-" ++ String.fromInt i)
+                                    , attribute "role" "tab"
+                                    , attribute "aria-controls" "setup-tab-panel"
+                                    , attribute "aria-selected"
+                                        (if i == m.step then
+                                            "true"
 
-                                     else
-                                        "false"
-                                    )
-                                , tabindex
-                                    (if i == m.step then
-                                        0
+                                         else
+                                            "false"
+                                        )
+                                    , tabindex
+                                        (if i == m.step then
+                                            0
 
-                                     else
-                                        -1
-                                    )
-                                , onClick (SetStep i)
-                                , preventDefaultOn "keydown" (setupTabKey i)
+                                         else
+                                            -1
+                                        )
+                                    , onClick (SetStep i)
+                                    , preventDefaultOn "keydown" (setupTabKey i)
+                                    ]
+                                    [ span [ class "setup-step-label" ] [ text t ] ]
                                 ]
-                                [ span [ class "setup-step-label" ] [ text t ] ]
-                            ]
+                        )
+                        [ "Size", "Sheet", "Arrangement", "Bleed" ]
                     )
-                    [ "Size", "Quantity & sheet", "Arrangement", "Bleed" ]
-                )
-            ]
-        , fieldset [ class "gang-setup-fields", disabled m.busy ] [ div [ id "setup-tab-panel", class "setup-step-panel", attribute "role" "tabpanel", attribute "aria-labelledby" ("setup-tab-" ++ String.fromInt m.step), tabindex 0 ] (h3 [ class "visually-hidden" ] [ text title ] :: controls) ]
-        , div [ class "setup-step-actions elm-setup-actions" ]
-            [ if m.step > 0 then
-                btn "Back" (SetStep (m.step - 1))
+                ]
+          )
+        , ( "fields-" ++ String.fromInt m.step
+          , fieldset [ class "gang-setup-fields", disabled m.busy ] [ div [ id "setup-tab-panel", class "setup-step-panel", attribute "role" "tabpanel", attribute "aria-labelledby" ("setup-tab-" ++ String.fromInt m.step), tabindex 0 ] (h3 [ class "visually-hidden" ] [ text title ] :: controls) ]
+          )
+        , ( "actions"
+          , div [ class "setup-step-actions elm-setup-actions" ]
+                [ if m.step > 0 then
+                    button [ type_ "button", class "ghost-button setup-back-button", onClick (SetStep (m.step - 1)) ] [ text "Back" ]
 
-              else
-                text ""
-            , if m.step < 3 then
-                primary "Continue" (SetStep (m.step + 1)) False
+                  else
+                    text ""
+                , if m.step < 3 then
+                    button [ type_ "button", class "primary-button setup-continue-button", onClick (SetStep (m.step + 1)) ] [ text "Continue" ]
 
-              else
-                primary "Download imposed PDF" Submit (not (setupValid m) || m.busy || not m.layoutReady)
-            ]
-        , if m.step == 3 then
-            details [ class "elm-saved-footer" ] [ summary [] [ text "Saved work" ], savedView m ]
-
-          else
-            text ""
+                  else
+                    button [ type_ "button", class "primary-button setup-download-button", onClick Submit, disabled (not (setupValid m) || m.busy || not m.layoutReady) ] [ text "Download imposed PDF" ]
+                ]
+          )
         ]
 
 
@@ -905,17 +909,36 @@ toolbarView m =
                 m.request.finishedCutSize
     in
     section [ class "impose-workspace-toolbar elm-toolbar", attribute "aria-label" "Artwork and sheet preview controls" ]
-        [ btn
-            (if m.collapsed then
-                "Show setup toolbar"
+        [ button
+            [ type_ "button"
+            , class "ghost-button elm-setup-toggle"
+            , attribute "aria-label"
+                (if m.collapsed then
+                    "Show setup toolbar"
 
-             else
-                "Hide setup toolbar"
-            )
-            (Toggle "collapse")
+                 else
+                    "Hide setup toolbar"
+                )
+            , title
+                (if m.collapsed then
+                    "Show setup toolbar"
+
+                 else
+                    "Hide setup toolbar"
+                )
+            , onClick (Toggle "collapse")
+            ]
+            [ text
+                (if m.collapsed then
+                    "›"
+
+                 else
+                    "‹"
+                )
+            ]
         , details [ class "elm-artwork-menu artwork-toolbar-disclosure" ]
             [ summary [ class "ghost-button" ] [ text "Artwork" ]
-            , fieldset [ disabled m.busy ]
+            , fieldset [ disabled m.busy, attribute "popover" "manual" ]
                 [ choices "Artwork fitting"
                     "fit"
                     (case fit.mode of
@@ -931,6 +954,8 @@ toolbarView m =
                     [ ( "contain", "Fit" ), ( "cover", "Fill" ), ( "stretch", "Stretch" ) ]
                 , selectField "Impression orientation" "orientation" (orientationName m.request.orientationPreference) [ ( "auto", "Auto · best sheet fit" ), ( "upright", "Upright · 0°" ), ( "quarterTurn", "Quarter-turn · 90°" ) ]
                 , selectField "Selected artwork" "page" (String.fromInt m.selectedPage) (List.range 1 (Maybe.withDefault 1 m.request.sourcePageCount) |> List.map (\i -> ( String.fromInt i, "Page " ++ String.fromInt i )))
+                , selectField "Selected artwork rotation" "artwork-rotation" (String.fromInt (I.artworkRotation m.selectedPage m.request)) [ ( "0", "Original · 0°" ), ( "90", "Clockwise · 90°" ), ( "180", "Upside down · 180°" ), ( "270", "Counterclockwise · 270°" ) ]
+                , p [ class "field-help" ] [ text "Rotate before fitting. Applies to all copies of this page. You can also right-click artwork on the sheet." ]
                 , check "Adjust only selected artwork" "per-artwork" m.perArtwork
                 , if m.perArtwork then
                     div [] [ div [ class "field-grid two" ] [ numberField m "Artwork finished width (in)" "artwork-width" size.width, numberField m "Artwork finished height (in)" "artwork-height" size.height ], btn "Use shared settings for this artwork" (Toggle "clear-override") ]
@@ -944,10 +969,13 @@ toolbarView m =
                     text ""
                 ]
             ]
-        , div [ class "sheet-preview-nav" ]
-            [ button [ type_ "button", class "ghost-button sheet-nav-button previous", attribute "aria-label" "Previous sheet", disabled (m.sheet == 0), onClick (Navigate (Basics.max 0 (m.sheet - 1)) m.back) ] [ span [ class "sheet-nav-label" ] [ text "Previous sheet" ] ]
-            , span [] [ text ("Sheet " ++ String.fromInt (m.sheet + 1) ++ " of " ++ String.fromInt (Maybe.map .sheetsRequired m.layout |> Maybe.withDefault 1)) ]
-            , button [ type_ "button", class "ghost-button sheet-nav-button next", attribute "aria-label" "Next sheet", disabled (m.sheet + 1 >= (Maybe.map .sheetsRequired m.layout |> Maybe.withDefault 1)), onClick (Navigate (m.sheet + 1) m.back) ] [ span [ class "sheet-nav-label" ] [ text "Next sheet" ] ]
+        , div [ class "preview-zoom-controls", attribute "role" "group", attribute "aria-label" "Preview zoom and side" ]
+            [ button [ type_ "button", attribute "aria-label" "Zoom out", onClick (Toggle "zoom-out") ] [ text "−" ]
+            , button [ type_ "button", attribute "aria-label" "Zoom in", onClick (Toggle "zoom-in") ] [ text "+" ]
+            , button [ type_ "button", class "ghost-button", attribute "aria-label" "Fit sheet", onClick (Toggle "zoom-fit") ]
+                [ span [ class "zoom-fit-full" ] [ text "Fit sheet" ]
+                , span [ class "zoom-fit-compact" ] [ text "Fit" ]
+                ]
             , if m.request.sides == A.SidesDouble then
                 btn
                     (if m.back then
@@ -961,7 +989,13 @@ toolbarView m =
               else
                 text ""
             ]
-        , details [] [ summary [] [ text "Preview options" ], fieldset [] [ check "Cut lines" "cut" m.showCut, check "Bleed lines" "bleed-lines" m.showBleed, check "Gutters" "gutters" m.showGutters, check "Cut paths" "paths" m.showPaths, btn "Zoom out" (Toggle "zoom-out"), btn "Zoom in" (Toggle "zoom-in"), btn "Fit sheet" (Toggle "zoom-fit") ] ]
+        , div [ class "elm-preview-controls" ]
+            [ div [ class "sheet-preview-nav" ]
+                [ span [ class "sheet-nav-status", attribute "role" "status" ] [ text ("Sheet " ++ String.fromInt (m.sheet + 1) ++ " of " ++ String.fromInt (Maybe.map .sheetsRequired m.layout |> Maybe.withDefault 1)) ]
+                , button [ type_ "button", class "ghost-button sheet-nav-button previous", attribute "aria-label" "Previous sheet", disabled (m.sheet == 0), onClick (Navigate (Basics.max 0 (m.sheet - 1)) m.back) ] [ span [ class "sheet-nav-label" ] [ text "Previous sheet" ] ]
+                , button [ type_ "button", class "ghost-button sheet-nav-button next", attribute "aria-label" "Next sheet", disabled (m.sheet + 1 >= (Maybe.map .sheetsRequired m.layout |> Maybe.withDefault 1)), onClick (Navigate (m.sheet + 1) m.back) ] [ span [ class "sheet-nav-label" ] [ text "Next sheet" ] ]
+                ]
+            ]
         ]
 
 

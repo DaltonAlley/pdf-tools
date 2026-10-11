@@ -2,6 +2,53 @@
    jobs, and production geometry belong to Elm/Rust. No secure-context APIs. */
 export function connect(app) {
   const send = event => app.ports.browserEvents.send(event);
+  let artworkTrigger;
+  const closeArtworkMenu = (restore = false) => {
+    const menu = document.getElementById('artwork-context-menu');
+    const wasOpen = menu?.matches(':popover-open');
+    if (wasOpen) menu.hidePopover();
+    if (restore && wasOpen) requestAnimationFrame(() => artworkTrigger?.isConnected && artworkTrigger.focus({preventScroll:true}));
+  };
+  const openArtworkMenu = (item, x, y) => {
+    if (item.dataset.artworkDisabled === 'true') return;
+    send({action:'artworkMenu', page:Number(item.dataset.artworkPage), index:Number(item.dataset.impressionIndex), x, y, trigger:item.id});
+  };
+  document.addEventListener('contextmenu', event => {
+    const item = event.target.closest('.sheet-item');
+    if (!item) return;
+    event.preventDefault();
+    const bounds = item.querySelector('.piece-hit-area').getBoundingClientRect();
+    openArtworkMenu(item, event.clientX || bounds.x, event.clientY || bounds.y);
+  });
+  document.addEventListener('keydown', event => {
+    const item = event.target.closest('.sheet-item');
+    if (item && (['ContextMenu','Enter',' '].includes(event.key) || (event.shiftKey && event.key === 'F10'))) {
+      event.preventDefault();
+      const bounds = item.querySelector('.piece-hit-area').getBoundingClientRect();
+      openArtworkMenu(item, bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+      return;
+    }
+    const menu = event.target.closest('#artwork-context-menu');
+    if (!menu) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeArtworkMenu(true);
+    } else if (event.key === 'Tab') {
+      closeArtworkMenu();
+      artworkTrigger?.focus({preventScroll:true});
+    } else if (['ArrowDown','ArrowUp','Home','End'].includes(event.key)) {
+      event.preventDefault();
+      const items = [...menu.querySelectorAll('button:not(:disabled)')];
+      const index = items.indexOf(document.activeElement);
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+      items[next]?.focus();
+    }
+  });
+  document.addEventListener('toggle', event => {
+    if (event.target.id === 'artwork-context-menu' && event.newState === 'closed') send({action:'closeArtworkMenu'});
+  }, true);
+  document.addEventListener('scroll', () => closeArtworkMenu(), true);
+  window.addEventListener('resize', () => closeArtworkMenu());
   let workspaceFrame, workspaceAnimations = [];
   const stopWorkspaceTransition = () => {
     cancelAnimationFrame(workspaceFrame);
@@ -26,11 +73,14 @@ export function connect(app) {
       if (!shell.isConnected || shell.classList.contains('empty-shell')) return;
       const style = getComputedStyle(shell);
       const options = {duration:parseFloat(style.getPropertyValue('--workspace-duration')), easing:style.getPropertyValue('--workspace-easing').trim()};
+      // Measure the settled layout before temporary animation alignment changes
+      // the header's intrinsic width. Otherwise it shrinks too far, then jumps
+      // back to its stretched width when the animation is removed.
+      const targets = frames.filter(frame => frame.element.isConnected).map(frame => ({...frame, next:frame.element.getBoundingClientRect(), nextRadius:getComputedStyle(frame.element).borderRadius}));
       // Keep the grid's final positions fixed while the child frames resize;
       // centering must not shift a second time during the return animation.
       shell.style.setProperty('--workspace-rows', style.gridTemplateRows);
       shell.setAttribute('data-workspace-animating', '');
-      const targets = frames.filter(frame => frame.element.isConnected).map(frame => ({...frame, next:frame.element.getBoundingClientRect(), nextRadius:getComputedStyle(frame.element).borderRadius}));
       workspaceAnimations = targets.map(({element, bounds, radius, next, nextRadius}) => {
         const shape = {borderRadius:radius, height:`${bounds.height}px`};
         const settled = {borderRadius:nextRadius, height:`${next.height}px`};
@@ -157,6 +207,19 @@ export function connect(app) {
   app.ports.resources.subscribe(command => {
     switch(command.action) {
       case 'workspaceTransition': animateWorkspace(); break;
+      case 'artworkMenu':
+        requestAnimationFrame(() => {
+          const menu = document.getElementById('artwork-context-menu');
+          artworkTrigger = document.getElementById(command.trigger);
+          if (!menu || !artworkTrigger || artworkTrigger.dataset.artworkDisabled === 'true') return;
+          menu.showPopover();
+          const bounds = menu.getBoundingClientRect();
+          menu.style.left = `${Math.max(8,Math.min(command.x,innerWidth-bounds.width-8))}px`;
+          menu.style.top = `${Math.max(8,Math.min(command.y,innerHeight-bounds.height-8))}px`;
+          menu.querySelector('button:not(:disabled)')?.focus({preventScroll:true});
+        });
+        break;
+      case 'closeArtworkMenu': closeArtworkMenu(true); break;
       case 'identity': identity = command.token; downloadController?.abort(); break;
       case 'preview': void preview(command); break;
       case 'cancelPreview': previewController?.abort(); break;
@@ -189,15 +252,33 @@ export function connect(app) {
   const visible = () => { if (document.visibilityState === 'visible') send({action:'visible'}); };
   document.addEventListener('visibilitychange',visible);
   const fitPopover = details => {
-    const panel = details?.matches?.('.elm-toolbar details[open]') && details.querySelector(':scope > fieldset');
+    const panel = details?.matches?.('.elm-toolbar details') && details.querySelector(':scope > fieldset');
     if (panel) {
-      const left=details.getBoundingClientRect().left;
-      panel.style.right='auto';
-      panel.style.left=`${Math.max(8,Math.min(left,innerWidth-panel.offsetWidth-8))-left}px`;
-      panel.style.maxHeight = `${Math.max(80,Math.min(580,innerHeight-panel.getBoundingClientRect().top-12))}px`;
+      // The trigger and CSS width are measurable while details is closed.
+      // Position before native activation so the first frame is already final;
+      // a deferred toggle callback used to move the panel after it appeared.
+      const bounds = details.getBoundingClientRect();
+      const width = parseFloat(getComputedStyle(panel).width);
+      panel.style.left = `${Math.max(8,Math.min(bounds.left,innerWidth-width-8))}px`;
+      panel.style.top = `${bounds.bottom}px`;
+      panel.style.maxHeight = `${Math.max(80,Math.min(580,innerHeight-bounds.bottom-12))}px`;
     }
   };
-  document.addEventListener('toggle',event => requestAnimationFrame(() => fitPopover(event.target)),true);
+  document.addEventListener('click',event => {
+    const trigger = event.target.closest('.elm-toolbar details > summary');
+    if (trigger) fitPopover(trigger.parentElement);
+  },true);
+  document.addEventListener('toggle',event => {
+    if (!event.target.matches?.('.elm-toolbar details')) return;
+    const panel = event.target.querySelector(':scope > fieldset');
+    if (event.target.open) {
+      fitPopover(event.target);
+      panel?.showPopover();
+    } else if (panel?.matches(':popover-open')) panel.hidePopover();
+  },true);
+  document.addEventListener('scroll',event => {
+    if (event.target.matches?.('.elm-toolbar')) document.querySelectorAll('.elm-toolbar details[open]').forEach(fitPopover);
+  },true);
   window.addEventListener('resize',() => document.querySelectorAll('.elm-toolbar details[open]').forEach(fitPopover));
   // FileList is not a JSON array; keep File objects native and adapt only the
   // browser event payload for Elm's File.decoder.

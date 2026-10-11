@@ -109,7 +109,7 @@ This document records the durable rules that PDF Tools changes must preserve.
 ## INV-ARTWORK-CONTEXTS: Keep impose contexts explicit and bounded
 
 - **Scope:** Imposition setup, the workspace toolbar, the Artwork inspector, and responsive sheet preview layout.
-- **Rule:** Provide three keyboard-operable rail contexts: Setup, Artwork, and Preview. Setup owns the four production steps Size, Quantity & sheet, Arrangement, and Bleed. Keep global Fit/Fill/Stretch and impression orientation in the in-flow workspace toolbar, with an override badge and conditional Position entry point. Put crop positioning, nine anchors, fine-tune sliders, mixed-artwork scope, source details, reset, and sticky Done in the bounded Artwork rail. Guides and Fit-sheet/100% zoom remain available in Preview. No artwork control may cover the sheet or rely on a floating overlay.
+- **Rule:** Provide three keyboard-operable rail contexts: Setup, Artwork, and Preview. Setup owns the four production steps Size, Sheet, Arrangement, and Bleed. Keep global Fit/Fill/Stretch and impression orientation in the in-flow workspace toolbar, with an override badge and conditional Position entry point. Put crop positioning, nine anchors, fine-tune sliders, mixed-artwork scope, source details, reset, and sticky Done in the bounded Artwork rail. Guides and Fit-sheet/100% zoom remain available in Preview. Persistent artwork controls must remain outside the sheet. A temporary item context menu may appear over it for the requested per-artwork actions.
 - **Evidence:** Agent-browser checks at 1366 × 768 and 800 × 900, keyboard rail traversal, bounded rail/footer geometry, direct one-page quantity, More-menu safety, crop and reset interactions, guide/zoom controls, and downloaded-PDF geometry parity.
 - **Origin:** The redesign supersedes the prior floating Artwork disclosure invariant.
 
@@ -117,5 +117,53 @@ This document records the durable rules that PDF Tools changes must preserve.
 
 - **Scope:** Entering and leaving Impose, including first deferred load and Retry.
 - **Rule:** Keep the frame and workflow contents visually coordinated, without an intermediate collapsed card, clipped primary actions, or late layout jumps. Avoid restarting animations on resize-observer feedback. Rapid switching must not resurrect a departed workflow. Reduced motion must remain immediate, and loading/recovery must not discard files or settings.
-- **Evidence:** Before/after real-browser frame traces for cold/warm entry, exit, rapid reversal, delayed/failed loading, Retry, and reduced motion.
+- **Evidence:** Before/after real-browser frame traces for cold/warm entry, exit, rapid reversal, delayed/failed loading, Retry, and reduced motion. The `workspace_animation` browser acceptance check samples header, card, and action bounds during returns to PDF to images and Extract pages at desktop, laptop, and half-screen sizes to detect overshoot and late corrections.
 - **Origin:** The user requested polishing the animations when switching into Impose.
+
+## INV-IMPOSE-SETUP-STABILITY: Keep setup navigation in place
+
+- **Scope:** Switching steps and scrolling controls in the imposition setup view.
+- **Rule:** Keep Continue and the final download action on the right and Back on the left. Adding Back or switching between Size, Sheet, Arrangement, and Bleed must preserve the setup navigation, scrolling-region, and footer bounds at a fixed viewport. Additional controls and Saved work must scroll within the setup panel rather than displacing navigation. Newly selected steps start at the top of their controls while retaining form values. Keyboard focus must not move the surrounding page.
+- **Owner:** The Elm imposition setup view and its layout styles.
+- **Evidence:** The `setup_geometry` browser acceptance check samples rendered frames during step changes, rapid reversal, and rail scrolling at desktop, short-screen, tablet, and mobile widths. The `setup_tabs` check exercises keyboard navigation and preserves validation and drafts.
+- **Origin:** The user required stable right-side Continue and left-side Back buttons, a shorter Sheet tab label, and fixes plus regression tests for jitter when switching tabs and moving around the page.
+
+## INV-ARTWORK-FIRST-OPEN-STABILITY: Position Artwork before opening
+
+- **Scope:** The first Artwork opening in each imposition workflow.
+- **Rule:** Opening Artwork must display its final viewport-bounded position from the first frame, without moving the panel, trigger, toolbar, or workspace afterward. Keep native pointer and keyboard disclosure behavior.
+- **Owner:** The Artwork disclosure styles and browser popover positioning boundary.
+- **Evidence:** The `artwork_first_open` browser acceptance check samples fresh-workflow first openings at desktop, short-screen, tablet, and mobile sizes; `setup_tabs` covers keyboard disclosure activation.
+- **Origin:** The user reported jitter only on the first Artwork opening and required a fix with regression protection.
+
+## INV-IMPOSE-PREVIEW-CONTROLS: Keep cut paths visible and the toolbar simple
+
+- **Scope:** The imposition sheet preview and workspace toolbar.
+- **Rule:** Always show cut paths without a guide toggle. Do not display separate cut-line, bleed-line, or gutter overlays. Keep cut paths discernible over light and dark artwork, with a small fixed screen stroke while zooming. Keep artwork, zoom, sheet status, and duplex side controls consolidated into a single row, with adjacent Previous sheet and Next sheet buttons at the far right and horizontal scrolling where needed to preserve reachability on narrow screens. Do not collapse the setup scrolling region.
+- **Owner:** The Elm SVG preview, workspace toolbar, and responsive styles.
+- **Evidence:** The `preview_toolbar` browser acceptance check exercises always-visible cut paths, absence of guide toggles and other overlays, multi-sheet navigation, zoom, duplex side switching, and stable toolbar bounds; `responsive` covers control containment and narrow-screen reachability.
+- **Origin:** The user required a single-row toolbar, then simplified the guides to always-visible Cut paths with no toggle or separate Cut lines.
+
+## INV-ARTWORK-ROTATION: Rotate individual artwork before fitting
+
+- **Scope:** Imposition canvas item actions, artwork settings, layout planning, and PDF output.
+- **Rule:** Right-clicking a populated canvas item opens an extensible action menu for that artwork page. Support independent quarter-turn rotations and reset, with keyboard access and an equivalent control in Artwork. Apply the rotation before fitting to the chosen finished size, to every copy of the selected page only. Keep other artwork, finished cuts, quantities, bleed geometry, and duplex registration intact; preview and export must agree. Retain rotation in saved job settings and default older settings to zero.
+- **Owner:** Elm artwork overrides and the Rust page plan/export boundary.
+- **Evidence:** Model checks of page scope and preserved settings, Rust geometry/rotation checks, and the `artwork_rotation` browser acceptance check covering mixed orientations, menu interaction, preview, and downloaded output.
+- **Origin:** The user requested independent rotation through a canvas right-click menu so portrait and landscape example artwork can share an impose workflow.
+
+## INV-CANVAS-SPACE: Keep production-count copy out of the canvas
+
+- **Scope:** Imposition sheet preview.
+- **Rule:** Do not reserve a bottom canvas section for pieces-per-sheet, sheet count, pieces-produced, or extra-piece summary text. Keep the released space available for inspecting artwork; retain actionable production warnings in setup.
+- **Owner:** The imposition preview and setup views.
+- **Evidence:** Browser inspection of the preview region without a summary strip and with a sheet filling its available height.
+- **Origin:** The user explicitly requested removing the bottom production-count section to make more space in the canvas.
+
+## INV-IMPRESSION-SELECTION: Make the selected impression clear
+
+- **Scope:** Selecting, focusing, and opening actions for an impression on the impose canvas.
+- **Rule:** Indicate the selected impression with a clearly visible outline at its finished cut, distinct from cut paths and readable over light and dark artwork. Keep its stroke at a modest fixed screen width while zooming. Selection must not obscure artwork or show the browser's large SVG focus ring. Keep keyboard focus discernible and indicate only the selected impression, including when multiple copies share a page and while its right-click rotation menu is open.
+- **Owner:** The Elm impression selection state and SVG preview styles.
+- **Evidence:** Browser checks of click, keyboard focus, open context menu and dismissal, repeated copies, and zoom; screenshots confirm a clear cut-bound indicator without artwork obstruction.
+- **Origin:** The user initially requested a very small selection indicator, then requested a more obvious indication of the impression selected for right-click rotation after simplifying the guides to always-visible cut paths.

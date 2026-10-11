@@ -6,7 +6,7 @@ Choose explicit finished width and height before arranging impressions. Both fie
 
 Fit keeps the complete artwork visible and may leave borders. Fill preserves proportions and deliberately crops, with shared or per-artwork positioning. Stretch independently scales both axes to fill the finished size and explicitly warns of distortion. Finished orientation controls the product, while impression orientation controls placement on the parent sheet.
 
-Impose uses three bounded contexts in one rail: Setup, Artwork, and Preview. Setup steps are Size, Quantity & sheet, Arrangement, and Bleed. The in-flow toolbar keeps Presets, one global Fit/Fill/Stretch control, impression orientation, the conditional Position entry point, and an override badge. Artwork owns the full crop and mixed-artwork/source inspector with drag, nine anchors, fine-tune sliders, reset, and sticky Done. Preview owns Guides and Fit-sheet/100% zoom. No sheet-covering artwork overlay is used, and the footer remains bounded and visible.
+Impose uses three bounded contexts in one rail: Setup, Artwork, and Preview. Setup steps are Size, Sheet, Arrangement, and Bleed. The in-flow toolbar keeps Presets, one global Fit/Fill/Stretch control, impression orientation, the conditional Position entry point, and an override badge. Artwork owns the full crop and mixed-artwork/source inspector with drag, nine anchors, fine-tune sliders, reset, and sticky Done. Preview owns Guides and Fit-sheet/100% zoom. No sheet-covering artwork overlay is used, and the footer remains bounded and visible.
 
 In Edit copy quantities, valid Apply to all commits every page/pair quantity and closes the dialog with focus returned to its opener. Invalid bulk input stays visible and does not apply.
 
@@ -68,7 +68,7 @@ signatures and rendered cut geometry.
 The rebuilt browser workflow verifies real focus on Finished width, toolbar
 placement and preset disclosure behavior, the four unchanged step labels with
 no numeric markers, keyboard selection of Artwork options in the order
-Stretch, Fit, Fill, valid `4.25` × `6.25` input through rendered `.piece-cut`
+Stretch, Fit, Fill, valid `4.25` × `6.25` input through rendered `.piece-hit-area`
 geometry, and invalid/partial dimension blocking. The project check and the
 workflow browser smoke are the acceptance commands for this revision.
 

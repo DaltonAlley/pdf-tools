@@ -37,7 +37,34 @@ source =
 tests : Test
 tests =
     describe "Validation and workspace transitions"
-        [ test "Finished size requires source preparation or entered dimensions"
+        [ test "Rotating a page preserves shared size, quantities and other artwork overrides"
+            (\_ ->
+                let
+                    r =
+                        initial.request
+
+                    before =
+                        { initial | operation = Impose, request = { r | sourcePageCount = Just 2, pageOverrides = [ { pageNumber = 2, rotationDegrees = 0, finishedCutSize = Just { width = 3, height = 2 }, artworkFit = Nothing } ] } }
+
+                    after =
+                        step (RotateArtwork 2 90) before
+
+                    restored =
+                        step (RotateArtwork 2 0) after
+                in
+                Expect.all
+                    [ \_ -> Expect.equal 0 (I.artworkRotation 1 after.request)
+                    , \_ -> Expect.equal 90 (I.artworkRotation 2 after.request)
+                    , \_ -> Expect.equal before.request restored.request
+                    , \_ -> Expect.equal before.request.finishedCutSize after.request.finishedCutSize
+                    , \_ -> Expect.equal before.request.quantityRequested after.request.quantityRequested
+                    , \_ -> Expect.equal before (step (RotateArtwork 2 45) before)
+                    , \_ -> Expect.equal before (step (RotateArtwork 3 90) before)
+                    , \_ -> Expect.equal False after.layoutReady
+                    ]
+                    ()
+            )
+        , test "Finished size requires source preparation or entered dimensions"
             (\_ ->
                 let
                     width =
@@ -227,7 +254,7 @@ tests =
                         I.initial
 
                     request =
-                        { r | sourceId = Just "source-7", sourcePageCount = Just 3, impositionMode = A.ImpositionModeRepeat, impressionQuantities = Just [ 2, 0, 3 ], quantityRequested = 5, pageOverrides = [ { pageNumber = 2, finishedCutSize = Just { width = 2, height = 1 }, artworkFit = Nothing } ] }
+                        { r | sourceId = Just "source-7", sourcePageCount = Just 3, impositionMode = A.ImpositionModeRepeat, impressionQuantities = Just [ 2, 0, 3 ], quantityRequested = 5, pageOverrides = [ { pageNumber = 2, rotationDegrees = 0, finishedCutSize = Just { width = 2, height = 1 }, artworkFit = Nothing } ] }
 
                     p =
                         { id = "preset", name = "Test", impositionMode = A.ImpositionModeUnique, finishedSizeMode = A.FinishedSizeModeCommon, artworkFit = r.artworkFit, sourceBleedOverride = Nothing, finishedCutSize = { width = 4.25, height = 6.25 }, parentSheetSize = r.parentSheetSize, bleedHandling = r.bleedOption, createdBleedAmount = r.createdBleedAmount, gutter = r.gutter, orientationPreference = r.orientationPreference, sides = r.sides, layoutPreference = r.layoutMode, manual = r.manual, duplex = r.duplex, outputPreference = A.OutputPreferenceCleanPdf, builtIn = False }

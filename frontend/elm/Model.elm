@@ -67,11 +67,9 @@ type alias Model =
     , repeatSingle : List Int
     , repeatDouble : List Int
     , selectedPage : Int
+    , selectedImpression : Maybe Int
+    , artworkMenu : Maybe Int
     , perArtwork : Bool
-    , showCut : Bool
-    , showBleed : Bool
-    , showGutters : Bool
-    , showPaths : Bool
     , zoom : Float
     , theme : String
     , dialog : String
@@ -101,6 +99,8 @@ type Msg
     | Field String String
     | Quantity Int String
     | CropAnchor Float Float
+    | RotateArtwork Int Int
+    | SelectImpression Int Int
     | SetStep Int
     | SetRail String
     | Toggle String

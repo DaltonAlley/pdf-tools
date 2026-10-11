@@ -387,6 +387,7 @@ sourcePageDecoder =
 
 type alias PageOverride =
     { pageNumber : Int
+    , rotationDegrees : Int
     , finishedCutSize : Maybe SizeInches
     , artworkFit : Maybe ArtworkFit
     }
@@ -396,6 +397,7 @@ pageOverrideEncoder : PageOverride -> Json.Encode.Value
 pageOverrideEncoder struct =
     Json.Encode.object
         [ ( "pageNumber", Json.Encode.int struct.pageNumber )
+        , ( "rotationDegrees", Json.Encode.int struct.rotationDegrees )
         , ( "finishedCutSize", (Maybe.withDefault Json.Encode.null << Maybe.map sizeInchesEncoder) struct.finishedCutSize )
         , ( "artworkFit", (Maybe.withDefault Json.Encode.null << Maybe.map artworkFitEncoder) struct.artworkFit )
         ]
@@ -405,6 +407,7 @@ pageOverrideDecoder : Json.Decode.Decoder PageOverride
 pageOverrideDecoder =
     Json.Decode.succeed PageOverride
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "pageNumber" Json.Decode.int))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "rotationDegrees" Json.Decode.int))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "finishedCutSize" (Json.Decode.nullable sizeInchesDecoder)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "artworkFit" (Json.Decode.nullable artworkFitDecoder)))
 
@@ -437,7 +440,8 @@ planRectDecoder =
 
 
 type alias PagePlan =
-    { positionTravel : CropPosition
+    { rotationDegrees : Int
+    , positionTravel : CropPosition
     , pageNumber : Int
     , sourcePdfSize : SizeInches
     , previewBox : Maybe PdfBox
@@ -450,7 +454,8 @@ type alias PagePlan =
 pagePlanEncoder : PagePlan -> Json.Encode.Value
 pagePlanEncoder struct =
     Json.Encode.object
-        [ ( "positionTravel", cropPositionEncoder struct.positionTravel )
+        [ ( "rotationDegrees", Json.Encode.int struct.rotationDegrees )
+        , ( "positionTravel", cropPositionEncoder struct.positionTravel )
         , ( "pageNumber", Json.Encode.int struct.pageNumber )
         , ( "sourcePdfSize", sizeInchesEncoder struct.sourcePdfSize )
         , ( "previewBox", (Maybe.withDefault Json.Encode.null << Maybe.map pdfBoxEncoder) struct.previewBox )
@@ -463,6 +468,7 @@ pagePlanEncoder struct =
 pagePlanDecoder : Json.Decode.Decoder PagePlan
 pagePlanDecoder =
     Json.Decode.succeed PagePlan
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "rotationDegrees" Json.Decode.int))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "positionTravel" cropPositionDecoder))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "pageNumber" Json.Decode.int))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "sourcePdfSize" sizeInchesDecoder))

@@ -58,13 +58,27 @@ quantities. Presets can be created, renamed, updated, applied, or deleted.
 Artwork is a workspace-level global context exposed through the compact
 **Artwork** toolbar beside the sheet preview, not a separate Setup step. **Fit**,
 **Fill**, **Stretch**, and impression orientation stay available as you move
-between the Size, Quantity & sheet, Arrangement, and Bleed tabs. All four tabs
+between the Size, Sheet, Arrangement, and Bleed tabs. All four tabs
 are available immediately, including while settings are incomplete or a preview
 is loading. Use the arrow keys, Home, or End to navigate the tabs. Open the
 Artwork disclosure when you need fitting controls, crop positioning, per-artwork
 overrides, or source and bleed information. On narrow screens, the toolbar stays
 outside the Setup panel while **Preview** remains focused on inspecting the
 sheet.
+
+Dashed cut paths are always visible on the sheet preview. The toolbar provides
+zoom, **Fit sheet**, and **Previous sheet** and **Next sheet** buttons at the far
+right. These controls stay in one row; on narrow screens, scroll the toolbar
+horizontally to reach them. Selecting an impression shows a blue outline with a
+narrow white border around its finished cut, including while its rotation menu
+is open. The outline stays the same thickness while zooming.
+
+Right-click a piece on the sheet to rotate its artwork clockwise, counterclockwise,
+or 180°, or reset its rotation. The menu applies to all copies of that artwork
+page. Rotation happens before Fit/Fill/Stretch, so portrait and landscape sources
+can fill the same finished size without changing other pages. Keyboard users can
+focus a piece and press Enter or Shift+F10; **Selected artwork rotation** in
+**Artwork** also provides these controls.
 
 Mixed-size PDF pages and images can share one manually defined finished size.
 Mixed pieces use regular slots large enough for the largest piece, with

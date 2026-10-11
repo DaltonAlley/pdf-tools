@@ -210,7 +210,7 @@ class Workflow:
             'finishedY': slot['finishedY'] + (slot['finishedHeight'] - size[1]) / 2,
             'finishedWidth': size[0], 'finishedHeight': size[1],
         }
-        svg = self.page.locator('.sheet-svg .piece-cut').first
+        svg = self.page.locator('.sheet-svg .piece-hit-area').first
         assert abs(float(svg.get_attribute('width')) - cut['finishedWidth']) < .001
         with fitz.open(output) as doc:
             assert len(doc) == layout['sheetsRequired']
@@ -337,7 +337,7 @@ class Workflow:
         self.page.locator('#finished-width').fill('3')
         self.page.locator('#finished-height').fill('2')
         self.button('Repeat pages').click()
-        self.step('Quantity & sheet')
+        self.step('Sheet')
         self.page.get_by_label('Copies', exact=True).fill('5')
         self.page.get_by_label('Print sheet size', exact=True).select_option(sheet)
         if sheet == 'custom':
@@ -356,7 +356,7 @@ class Workflow:
             self.button('Next sheet').click()
             self.idle()
         expect(self.button('Next sheet')).to_be_disabled()
-        expect(self.page.locator('.sheet-svg .piece-cut')).to_have_count(1)
+        expect(self.page.locator('.sheet-svg .piece-hit-area')).to_have_count(1)
         self.step('Bleed')
         output = self.download('Download imposed PDF', 'repeat-grid.pdf')
         with fitz.open(output) as doc:
@@ -373,7 +373,7 @@ class Workflow:
         self.impose(files)
         self.page.locator('#finished-width').fill('3')
         self.page.locator('#finished-height').fill('2')
-        self.step('Quantity & sheet')
+        self.step('Sheet')
         self.page.get_by_label('Printing', exact=True).select_option('double')
         self.step('Arrangement')
         self.button('Custom grid').click()
@@ -460,7 +460,7 @@ class Workflow:
         expect(self.page.locator('#finished-width')).to_have_value(str(finished[0]).removesuffix('.0'))
         expect(self.page.locator('#finished-height')).to_have_value(str(finished[1]).removesuffix('.0'))
         self.button('Repeat pages').click()
-        self.step('Quantity & sheet')
+        self.step('Sheet')
         self.page.get_by_label('Copies', exact=True).fill('2')
         self.idle()
         self.step('Bleed')
@@ -472,8 +472,8 @@ class Workflow:
         assert layout['rotationDegrees'] == rotation
         assert layout['pagePlans'][0]['finishedCutSize'] == dict(zip(('width', 'height'), finished))
         assert abs(layout['pagePlans'][0]['bleedAmount'] - .125) < .0001
-        expect(self.page.locator('.sheet-svg .piece-cut')).to_have_count(2)
-        for index, cut in enumerate(self.page.locator('.sheet-svg .piece-cut').all()):
+        expect(self.page.locator('.sheet-svg .piece-hit-area')).to_have_count(2)
+        for index, cut in enumerate(self.page.locator('.sheet-svg .piece-hit-area').all()):
             expected = {'x': .5, 'y': .3505 + index * 8.799, 'width': 11, 'height': 8.5}
             for key, value in expected.items():
                 assert abs(float(cut.get_attribute(key)) - value) < .0001, (index, key, value)
