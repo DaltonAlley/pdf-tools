@@ -6,13 +6,18 @@ RUN printf '%s\n' \
       > /etc/apt/sources.list \
     && rm -f /etc/apt/sources.list.d/* \
     && apt-get -o Acquire::Check-Valid-Until=false update \
-    && apt-get install -y --no-install-recommends ca-certificates=20230311+deb12u1 \
+    && apt-get install -y --no-install-recommends ca-certificates=20230311+deb12u1 opam=2.1.2-1 \
     && rm -rf /var/lib/apt/lists/*
+# The OCaml library compiles into a browser asset; no OCaml runtime is shipped.
+RUN opam init --bare --disable-sandboxing --yes \
+    && opam switch create /opt/pdf-tools-ocaml ocaml-base-compiler.4.14.2 --yes \
+    && opam install --switch=/opt/pdf-tools-ocaml --yes dune.3.17.2 js_of_ocaml.5.8.2 js_of_ocaml-compiler.5.8.2
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json ./
+COPY frontend/vendor ./vendor
 RUN npm ci
 COPY frontend ./
-RUN npm run build && test -f dist/app.html
+RUN opam exec --switch=/opt/pdf-tools-ocaml -- npm run build && test -f dist/app.html
 
 FROM --platform=$BUILDPLATFORM docker.io/library/rust@sha256:0e2bcaef56d041a486784e54104a81aebe0da44bd03019bd70bc0401e42e4a97 AS backend
 ARG TARGETARCH

@@ -1,6 +1,8 @@
 module Model exposing (..)
 
 import Api.Generated as A
+import Da.Dropdown as Dropdown
+import Da.Reorderable as Reorderable
 import Dict exposing (Dict)
 import File exposing (File)
 import Http
@@ -24,6 +26,10 @@ type alias Display =
     { layout : A.LayoutResult, urls : Dict Int String, sheet : Int, back : Bool, source : String }
 
 
+type alias Toast =
+    { id : Int, message : String, kind : String }
+
+
 type alias Model =
     { files : List Selected
     , attempted : List Selected
@@ -35,6 +41,8 @@ type alias Model =
     , progress : Int
     , error : String
     , notice : String
+    , toast : Maybe Toast
+    , nextToastId : Int
     , epoch : Int
     , job : Maybe String
     , jobKind : String
@@ -58,7 +66,6 @@ type alias Model =
     , back : Bool
     , step : Int
     , rail : String
-    , collapsed : Bool
     , chosenWidth : Bool
     , chosenHeight : Bool
     , autoFinishedSize : Bool
@@ -70,7 +77,6 @@ type alias Model =
     , selectedImpression : Maybe Int
     , artworkMenu : Maybe Int
     , perArtwork : Bool
-    , zoom : Float
     , theme : String
     , dialog : String
     , rangeDraft : String
@@ -79,8 +85,9 @@ type alias Model =
     , editingPreset : Maybe String
     , presets : List A.GangUpPreset
     , recent : List A.RecentGangUpJob
-    , history : List A.GangUpExportRecord
-    , dragId : Maybe Int
+    , fileOrder : Reorderable.State
+    , workspaceMenu : Bool
+    , dropdowns : Dict String Dropdown.State
     }
 
 
@@ -92,14 +99,16 @@ type Msg
     | Dropped (List File)
     | Inspected Int Int (Result Http.Error Int)
     | Remove Int
-    | Move Int Int
-    | Drag Int
-    | DropOn Int
+    | Reordered Reorderable.Change
+    | SetWorkspaceMenu Bool
+    | WorkspaceAction String
     | Switch Operation
     | Field String String
+    | DropdownChanged String String Dropdown.Change
     | Quantity Int String
     | CropAnchor Float Float
     | RotateArtwork Int Int
+    | RotateAllArtwork Int
     | SelectImpression Int Int
     | SetStep Int
     | SetRail String
@@ -119,6 +128,7 @@ type Msg
     | LayoutDue Int
     | LaidOut Int (Result Http.Error A.LayoutResult)
     | BrowserEvent D.Value
+    | SharedBrowserResponse D.Value
     | Navigate Int Bool
     | Lease Time.Posix
     | Catalog String (Result Http.Error D.Value)
@@ -127,6 +137,7 @@ type Msg
     | Save String
     | DeleteSaved String String
     | Saved String (Result Http.Error D.Value)
+    | DismissToast Int
     | NoOp
 
 

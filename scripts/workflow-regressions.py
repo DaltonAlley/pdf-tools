@@ -134,7 +134,11 @@ class Workflow:
                 self.analyses.append(source['analysis'])
 
     def button(self, name):
-        return self.page.get_by_role('button', name=name, exact=True)
+        return self.page.get_by_role('button', name=name, exact=True).or_(self.page.get_by_role('radio', name=name, exact=True))
+
+    def switch(self, name):
+        self.page.get_by_role('combobox', name='Tool', exact=True).click()
+        self.page.get_by_role('option', name=name, exact=True).click()
 
     def select(self, files):
         if isinstance(files, pathlib.Path):
@@ -156,7 +160,7 @@ class Workflow:
     def impose(self, files):
         self.select(files)
         if not self.page.locator('#finished-width').count():
-            self.button('Impose artwork').click()
+            self.switch('Impose artwork')
         expect(self.page.locator('#finished-width')).to_be_visible(timeout=60000)
         self.idle()
         expect(self.page.locator('.sheet-svg')).to_be_visible()
@@ -194,9 +198,8 @@ class Workflow:
         self.impose(path)
         expect(self.page.locator('#finished-width')).to_have_value(str(size[0]).removesuffix('.0'))
         expect(self.page.locator('#finished-height')).to_have_value(str(size[1]).removesuffix('.0'))
-        self.step('Arrangement')
+        self.step('Sheet')
         self.page.get_by_text('Advanced sheet settings', exact=True).click()
-        self.page.locator('#gang-setup-panel').get_by_label('Impression orientation', exact=True).select_option('upright')
         self.idle()
         layout = self.layouts[-1]
         assert layout['finishedCutSize'] == dict(zip(('width', 'height'), size)), layout
@@ -205,10 +208,11 @@ class Workflow:
         self.step('Bleed')
         output = self.download('Download imposed PDF', 'imposed.pdf')
         slot = layout['placements'][0]
+        width, height = size if layout['rotationDegrees'] % 180 == 0 else size[::-1]
         cut = {
-            'finishedX': slot['finishedX'] + (slot['finishedWidth'] - size[0]) / 2,
-            'finishedY': slot['finishedY'] + (slot['finishedHeight'] - size[1]) / 2,
-            'finishedWidth': size[0], 'finishedHeight': size[1],
+            'finishedX': slot['finishedX'] + (slot['finishedWidth'] - width) / 2,
+            'finishedY': slot['finishedY'] + (slot['finishedHeight'] - height) / 2,
+            'finishedWidth': width, 'finishedHeight': height,
         }
         svg = self.page.locator('.sheet-svg .piece-hit-area').first
         assert abs(float(svg.get_attribute('width')) - cut['finishedWidth']) < .001
@@ -250,7 +254,7 @@ class Workflow:
             expected = {'red': (255, 0, 0), 'lime': (0, 255, 0),
                         'blue': (0, 0, 255), 'yellow': (255, 255, 0)}.get(color) if isinstance(color, str) else (127, 127, 255)
             assert max(abs(a - b) for a, b in zip(actual, expected)) < 8, actual
-        self.button('Impose artwork').click()
+        self.switch('Impose artwork')
         self.idle()
         assert not self.analyses[-1]['likelyBleed']['detected'], self.analyses[-1]
         expect(self.page.locator('#finished-width')).to_have_value(str(pixels[0] / 300).removesuffix('.0'))
@@ -336,14 +340,14 @@ class Workflow:
         self.impose(fixture)
         self.page.locator('#finished-width').fill('3')
         self.page.locator('#finished-height').fill('2')
-        self.button('Repeat pages').click()
         self.step('Sheet')
+        self.button('Repeat pages').click()
         self.page.get_by_label('Copies', exact=True).fill('5')
         self.page.get_by_label('Print sheet size', exact=True).select_option(sheet)
         if sheet == 'custom':
             self.page.get_by_label('Sheet width (in)', exact=True).fill('10')
             self.page.get_by_label('Sheet height (in)', exact=True).fill('14')
-        self.step('Arrangement')
+        self.step('Sheet')
         self.button('Custom grid').click()
         self.page.get_by_label('Rows', exact=True).fill('1')
         self.page.get_by_label('Columns', exact=True).fill('2')
@@ -375,12 +379,11 @@ class Workflow:
         self.page.locator('#finished-height').fill('2')
         self.step('Sheet')
         self.page.get_by_label('Printing', exact=True).select_option('double')
-        self.step('Arrangement')
+        self.step('Sheet')
         self.button('Custom grid').click()
         self.page.get_by_label('Rows', exact=True).fill('1')
         self.page.get_by_label('Columns', exact=True).fill('2')
         self.page.get_by_text('Advanced sheet settings', exact=True).click()
-        self.page.locator('#gang-setup-panel').get_by_label('Impression orientation', exact=True).select_option('upright')
         self.page.get_by_label('Duplex flip edge', exact=True).select_option(edge)
         self.page.get_by_label('Rotate back side 180°', exact=True).set_checked(rotate)
         self.idle()
@@ -459,8 +462,8 @@ class Workflow:
         self.impose(source)
         expect(self.page.locator('#finished-width')).to_have_value(str(finished[0]).removesuffix('.0'))
         expect(self.page.locator('#finished-height')).to_have_value(str(finished[1]).removesuffix('.0'))
-        self.button('Repeat pages').click()
         self.step('Sheet')
+        self.button('Repeat pages').click()
         self.page.get_by_label('Copies', exact=True).fill('2')
         self.idle()
         self.step('Bleed')

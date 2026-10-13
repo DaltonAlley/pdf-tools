@@ -1,6 +1,9 @@
 # Rust build output
 /target/
 
+# Local application data
+/data/
+
 # Frontend build output
 /frontend/dist/
 
@@ -31,6 +34,7 @@ Thumbs.db
 /.codex/
 /frontend/node_modules/
 /frontend/elm-stuff/
+/frontend/browser/_build/
 /test-results/
 
 # Python acceptance scripts

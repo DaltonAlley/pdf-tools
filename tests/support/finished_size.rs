@@ -231,7 +231,8 @@ async fn supplied_bleed_outside_crop_is_visible_in_preview_and_export() {
 
 #[tokio::test]
 #[serial(pdfium)]
-async fn finished_size_presets_and_resized_manual_bleed_history_roundtrip_without_source_binding() {
+async fn finished_size_presets_and_resized_manual_bleed_saved_jobs_roundtrip_without_source_binding(
+) {
     let Some(state) = state_or_skip() else {
         return;
     };
@@ -280,13 +281,8 @@ async fn finished_size_presets_and_resized_manual_bleed_history_roundtrip_withou
     )
     .await;
     assert_eq!(exported.status(), StatusCode::OK);
-    assert!(
-        !exported
-            .headers()
-            .contains_key("x-pdf-tools-export-warning"),
-        "history persistence unexpectedly failed"
-    );
-    let records = send(state.clone(), get_request("/gang-up/export-history")).await;
+    assert!(body_bytes(exported).await.starts_with(b"%PDF-"));
+    let records = send(state.clone(), get_request("/gang-up/recent-jobs")).await;
     assert_eq!(records.status(), StatusCode::OK);
     let records: serde_json::Value = serde_json::from_slice(&body_bytes(records).await).unwrap();
     assert_eq!(records.as_array().unwrap().len(), 1);

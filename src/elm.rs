@@ -89,11 +89,7 @@ pub fn generate() -> String {
         LayoutResult,
         RecentGangUpJob,
         RecentGangUpJobInput,
-        GangUpExportType,
         OutputPreference,
-        GangUpExportRecord,
-        GangUpExportRecordInput,
-        GangUpStoredExportFileInput,
         RecentGangUpLayoutSummary,
         PiecePlacement,
         DuplexSettings,
@@ -139,12 +135,6 @@ pub fn contract_fixtures() -> crate::AppResult<String> {
     variants!("BleedSource", BleedSource, None, Detected, Manual);
     variants!("ImpositionMode", ImpositionMode, Repeat, Unique);
     variants!("DuplexFlipEdge", DuplexFlipEdge, LongEdge, ShortEdge);
-    variants!(
-        "GangUpExportType",
-        GangUpExportType,
-        CleanPdf,
-        LegacyDuploCutPlan
-    );
     variants!("OutputPreference", OutputPreference, CleanPdf);
     let request: actual::LayoutRequest = serde_json::from_value(json!({
         "sourceId": null, "sourcePages": [], "finishedSizeMode": "common",
@@ -198,20 +188,6 @@ pub fn contract_fixtures() -> crate::AppResult<String> {
             layout_summary: Some(summary.clone()),
         }
     );
-    add!(
-        "GangUpExportRecord",
-        actual::GangUpExportRecord {
-            id: "export-7".into(),
-            name: "Stored PDF".into(),
-            source_filename: None,
-            exported_at: "2026-10-06T12:00:00Z".into(),
-            output_type: actual::GangUpExportType::CleanPdf,
-            output_filename: "a=b-imposed.pdf".into(),
-            has_stored_file: true,
-            request: request.clone(),
-            layout_summary: Some(summary),
-        }
-    );
     let analysis: actual::PdfAnalysis = serde_json::from_value(json!({
         "filename":"mixed.pdf", "pageCount":2, "sourcePdfSize":request.source_pdf_size,
         "orientation":"landscape", "mediaBox":null, "cropBox":null, "bleedBox":null,
@@ -251,9 +227,7 @@ mod tests {
         assert_eq!(code, generate());
         assert!(code.contains("OrientationPortrait"));
         assert!(code.contains("OrientationPreferencePortrait"));
-        assert!(code.contains("GangUpExportTypeCleanPdf"));
         assert!(code.contains("OutputPreferenceCleanPdf"));
-        assert!(code.contains("Json.Encode.string \"duploCutPlan\""));
         assert!(!code.contains("struct.backAlignment"));
         assert!(code.contains("Json.Decode.field \"backAlignment\""));
     }

@@ -13,7 +13,7 @@ use crate::{
         DEFAULT_MAX_IMPOSE_UPLOAD_BYTES,
     },
     error::{AppError, AppResult},
-    imposition::{GangUpExportHistoryStore, PresetStore, RecentGangUpStore, SourceSessionStore},
+    imposition::{PresetStore, RecentGangUpStore, SourceSessionStore},
     jobs::JobStore,
 };
 
@@ -40,7 +40,6 @@ pub struct AppState {
     impose_upload_limits: ImposeUploadLimits,
     preset_store: PresetStore,
     recent_gang_up_store: RecentGangUpStore,
-    gang_up_export_history_store: GangUpExportHistoryStore,
     source_session_store: SourceSessionStore,
     impose_staging_dir: Arc<PathBuf>,
     pub(crate) jobs: JobStore,
@@ -113,6 +112,7 @@ impl AppState {
         })
         .transpose()?;
         let data_dir = read_data_dir()?;
+        remove_legacy_exports(&data_dir);
         let impose_staging_dir = Arc::new(initialize_impose_staging(&data_dir)?);
         let pdfium = Arc::new(bind_pdfium()?);
         let cpu_pool = Arc::new(build_cpu_pool(cpu_permits)?);
@@ -132,7 +132,6 @@ impl AppState {
             ),
             preset_store: PresetStore::new(data_dir.clone()),
             recent_gang_up_store: RecentGangUpStore::new(data_dir.clone()),
-            gang_up_export_history_store: GangUpExportHistoryStore::new(data_dir.clone()),
             source_session_store: SourceSessionStore::new(data_dir),
             impose_staging_dir,
             jobs: JobStore::new(max_active_operations),
@@ -278,10 +277,6 @@ impl AppState {
         self.recent_gang_up_store.clone()
     }
 
-    pub(crate) fn gang_up_export_history_store(&self) -> GangUpExportHistoryStore {
-        self.gang_up_export_history_store.clone()
-    }
-
     pub(crate) fn source_session_store(&self) -> SourceSessionStore {
         self.source_session_store.clone()
     }
@@ -352,6 +347,7 @@ impl AppState {
         data_dir: PathBuf,
         max_download_bytes: Option<usize>,
     ) -> AppResult<Self> {
+        remove_legacy_exports(&data_dir);
         let impose_staging_dir = Arc::new(initialize_impose_staging(&data_dir)?);
         Ok(Self {
             cpu: Arc::new(Semaphore::new(1)),
@@ -368,11 +364,28 @@ impl AppState {
             ),
             preset_store: PresetStore::new(data_dir.clone()),
             recent_gang_up_store: RecentGangUpStore::new(data_dir.clone()),
-            gang_up_export_history_store: GangUpExportHistoryStore::new(data_dir.clone()),
             source_session_store: SourceSessionStore::new(data_dir),
             impose_staging_dir,
             jobs: JobStore::new(Some(1)),
         })
+    }
+}
+
+fn remove_legacy_exports(data_dir: &std::path::Path) {
+    for name in ["gang-up-export-history.json", "gang-up-export-files"] {
+        let path = data_dir.join(name);
+        let result = std::fs::symlink_metadata(&path).and_then(|metadata| {
+            if metadata.is_dir() {
+                std::fs::remove_dir_all(&path)
+            } else {
+                std::fs::remove_file(&path)
+            }
+        });
+        if let Err(error) = result {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                tracing::warn!(%error, path = %path.display(), "could not remove legacy export archive");
+            }
+        }
     }
 }
 

@@ -2,7 +2,7 @@ use std::{collections::VecDeque, sync::Arc};
 
 use axum::{
     extract::{Json, Multipart, Path, RawQuery, State},
-    http::{header::CACHE_CONTROL, HeaderName, HeaderValue, StatusCode},
+    http::{header::CACHE_CONTROL, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
@@ -18,10 +18,7 @@ use crate::{
     documents::{output_filename, OutputKind},
     error::{AppError, AppResult},
     imposition as gang_up_export, imposition as gang_up_layout, imposition as gang_up_pdf,
-    imposition::{
-        GangUpExportRecordInput, GangUpExportType, LayoutRequest, LayoutResult, PdfAnalysis,
-        RecentGangUpLayoutSummary, SourceSessionFile,
-    },
+    imposition::{LayoutRequest, PdfAnalysis, SourceSessionFile},
     progress::{mapped, report, ProgressCallback},
     AppState,
 };
@@ -643,19 +640,6 @@ pub(crate) async fn layout(
     Ok(no_store(Json(result).into_response()))
 }
 
-#[derive(Clone, Copy)]
-enum ExportWarning {
-    HistoryPersistenceFailed,
-}
-
-impl ExportWarning {
-    const fn header_value(self) -> &'static str {
-        match self {
-            Self::HistoryPersistenceFailed => "history-persistence-failed",
-        }
-    }
-}
-
 pub(crate) async fn export_pdf(
     State(state): State<Arc<AppState>>,
     multipart: Multipart,
@@ -663,19 +647,7 @@ pub(crate) async fn export_pdf(
     let form = read_multipart(multipart).await?;
     let operation_permit = state.admit_operation()?;
     let download = export_pdf_form(state, form, operation_permit, None).await?;
-    response_with_export_ids(
-        download.file,
-        download.export_id.as_deref(),
-        download.cut_plan_export_id.as_deref(),
-        download.warning,
-    )
-}
-
-pub(crate) struct GangUpExportDownload {
-    pub(crate) file: FileDownload,
-    export_id: Option<String>,
-    cut_plan_export_id: Option<String>,
-    warning: Option<ExportWarning>,
+    Ok(download.into_response())
 }
 
 pub(crate) async fn export_pdf_form(
@@ -683,7 +655,7 @@ pub(crate) async fn export_pdf_form(
     form: FormData,
     operation_permit: OperationPermit,
     progress: Option<ProgressCallback>,
-) -> AppResult<GangUpExportDownload> {
+) -> AppResult<FileDownload> {
     report(&progress, 25, "Validating impose settings")?;
     let request_json = form.required_field("layoutRequest")?;
     let request: LayoutRequest = serde_json::from_str(request_json)
@@ -737,7 +709,7 @@ pub(crate) async fn export_pdf_source_form(
     form: FormData,
     operation_permit: OperationPermit,
     progress: Option<ProgressCallback>,
-) -> AppResult<GangUpExportDownload> {
+) -> AppResult<FileDownload> {
     report(&progress, 25, "Loading prepared source PDF")?;
     let request: LayoutRequest = serde_json::from_str(form.required_field("layoutRequest")?)
         .map_err(|_| AppError::bad_request("layoutRequest is not valid JSON"))?;
@@ -780,7 +752,7 @@ async fn export_pdf_file(
     operation_permit: OperationPermit,
     progress: Option<ProgressCallback>,
     source_prepared: bool,
-) -> AppResult<GangUpExportDownload> {
+) -> AppResult<FileDownload> {
     let source_filename = file.filename().to_string();
     let imposed_filename = output_filename(&source_filename, OutputKind::ImposedPdf);
     let file = if source_prepared {
@@ -802,7 +774,6 @@ async fn export_pdf_file(
                 .await?,
         )
     };
-    let history_store = state.gang_up_export_history_store();
     let max_download_bytes = state.max_download_bytes();
     let export_progress = progress.clone();
 
@@ -819,89 +790,13 @@ async fn export_pdf_file(
                 ),
             }?;
             validate_download_size(artifact.bytes.len(), max_download_bytes)?;
-            report(&export_progress, 92, "Saving export history")?;
-            let pdf_input = generated_export_record_input(
-                &source_filename,
-                &imposed_filename,
-                GangUpExportType::CleanPdf,
-                artifact.canonical_request.clone(),
-                &artifact.layout,
-            );
-            let history = history_store.create_generated(pdf_input, &artifact.bytes);
-            let (record, warning) = match history {
-                Ok(record) => (Some(record), None),
-                Err(error) => {
-                    tracing::warn!(%error, "imposed PDF downloaded without saving export history");
-                    (None, Some(ExportWarning::HistoryPersistenceFailed))
-                }
-            };
             let file = FileDownload::new("application/pdf", imposed_filename, artifact.bytes);
-            Ok((file, record.map(|record| record.id), warning))
+            Ok(file)
         })
         .await?;
 
     report(&progress, 96, "Preparing imposed PDF download")?;
-    Ok(GangUpExportDownload {
-        file: download.0,
-        export_id: download.1,
-        cut_plan_export_id: None,
-        warning: download.2,
-    })
-}
-
-fn generated_export_record_input(
-    source_filename: &str,
-    output_filename: &str,
-    output_type: GangUpExportType,
-    request: LayoutRequest,
-    layout: &LayoutResult,
-) -> GangUpExportRecordInput {
-    let output_name = "Clean PDF";
-    GangUpExportRecordInput {
-        name: Some(format!("{source_filename} - {output_name}")),
-        source_filename: Some(source_filename.to_string()),
-        output_type,
-        output_filename: output_filename.to_string(),
-        stored_file: None,
-        request,
-        layout_summary: Some(RecentGangUpLayoutSummary {
-            pieces_per_sheet: layout.pieces_per_sheet,
-            sheets_required: layout.sheets_required,
-            total_pieces_produced: layout.total_pieces_produced,
-            extra_pieces_produced: layout.extra_pieces_produced,
-        }),
-    }
-}
-
-fn response_with_export_ids(
-    file: FileDownload,
-    id: Option<&str>,
-    cut_plan_id: Option<&str>,
-    warning: Option<ExportWarning>,
-) -> AppResult<Response> {
-    let mut response = file.into_response();
-    if let Some(id) = id {
-        response.headers_mut().insert(
-            HeaderName::from_static("x-gang-up-export-id"),
-            HeaderValue::from_str(id)
-                .map_err(|_| AppError::Internal("could not encode export record id".to_string()))?,
-        );
-    }
-    if let Some(cut_plan_id) = cut_plan_id {
-        response.headers_mut().insert(
-            HeaderName::from_static("x-gang-up-cut-plan-export-id"),
-            HeaderValue::from_str(cut_plan_id).map_err(|_| {
-                AppError::Internal("could not encode cut-plan export record id".to_string())
-            })?,
-        );
-    }
-    if let Some(warning) = warning {
-        response.headers_mut().insert(
-            HeaderName::from_static("x-gang-up-export-warning"),
-            HeaderValue::from_static(warning.header_value()),
-        );
-    }
-    Ok(response)
+    Ok(download)
 }
 
 fn no_store(mut response: Response) -> Response {
@@ -1041,26 +936,6 @@ mod tests {
         assert_eq!(analysis.source_pages[1].source_pdf_size.width, 2.0);
         drop(prepared);
         std::fs::remove_dir(staging_dir).unwrap();
-    }
-
-    #[test]
-    fn history_failure_warning_is_exposed_without_export_ids() {
-        let response = response_with_export_ids(
-            FileDownload::new("application/pdf", "export.pdf", b"%PDF-test".to_vec()),
-            None,
-            None,
-            Some(ExportWarning::HistoryPersistenceFailed),
-        )
-        .unwrap();
-
-        assert_eq!(
-            response.headers().get("x-gang-up-export-warning").unwrap(),
-            "history-persistence-failed"
-        );
-        assert!(!response.headers().contains_key("x-gang-up-export-id"));
-        assert!(!response
-            .headers()
-            .contains_key("x-gang-up-cut-plan-export-id"));
     }
 
     #[tokio::test]

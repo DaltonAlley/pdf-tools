@@ -7,6 +7,7 @@ npm run build --prefix frontend
 cargo build --locked --bin pdf-tools-server
 export PORT="${PORT:-3200}"
 export PDF_TOOLS_BIND_ADDRESS="${PDF_TOOLS_BIND_ADDRESS:-127.0.0.1}"
+export PDF_TOOLS_FRONTEND_DIR="$PWD/frontend/dist"
 # Serve all assets and APIs from Axum. Rebuild changed Elm/CSS/bridge files;
 # ordinary reload picks up the new versioned bundle.
 node frontend/watch.mjs &

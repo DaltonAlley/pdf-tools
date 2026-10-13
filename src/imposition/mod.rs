@@ -4,7 +4,6 @@
 //! operations and persistence handles needed by that composition layer.
 
 mod export;
-mod export_history_store;
 mod geometry;
 mod intake;
 mod layout;
@@ -21,16 +20,12 @@ pub(crate) use export::{
     export_clean_imposed_pdf, export_clean_imposed_pdf_path, flatten_annotations_for_export,
     flatten_annotations_path, resolve_request_source_path,
 };
-pub(crate) use export_history_store::GangUpExportHistoryStore;
 pub(crate) use intake::{
     normalize_staged_imposition_geometry, ArtworkPageIdentity, OrientationNormalization,
     StagedArtworkPdf,
 };
 pub(crate) use layout::generate_layout;
-pub(crate) use model::{
-    GangUpExportRecordInput, GangUpExportType, LayoutRequest, LayoutResult, PdfAnalysis,
-    PresetInput, RecentGangUpJobInput, RecentGangUpLayoutSummary,
-};
+pub(crate) use model::{LayoutRequest, PdfAnalysis, PresetInput, RecentGangUpJobInput};
 pub(crate) use pdf::{
     analyze_pdf, analyze_pdf_path_structural, analyze_pdf_structural, prepare_artwork_preview,
 };

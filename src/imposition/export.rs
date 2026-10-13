@@ -219,8 +219,8 @@ fn export_loaded_document(
 
     Ok(ExportArtifact {
         bytes,
+        #[cfg(test)]
         layout,
-        canonical_request: request,
     })
 }
 
@@ -300,8 +300,8 @@ fn validate_resolved_source_bleed(
 
 pub(crate) struct ExportArtifact {
     pub(crate) bytes: Vec<u8>,
+    #[cfg(test)]
     pub(crate) layout: LayoutResult,
-    pub(crate) canonical_request: LayoutRequest,
 }
 
 #[derive(Debug, Clone, Copy)]

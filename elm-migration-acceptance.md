@@ -8,10 +8,8 @@ remain in place.
 ## Baseline and implementation
 
 The original frontend and `frontend/styles.css` supplied the visual and workflow
-baseline, together with `finished-artwork-acceptance.md`,
-`inspection-edge-cases.md`, `transition-edge-cases.md`, `startup-edge-cases.md`,
-`startup-performance.md`, and the existing smoke scripts. The tool selector,
-file queue, four imposition setup steps, artwork toolbar, and setup/preview
+baseline. The tool selector,
+file queue, three imposition setup steps, artwork toolbar, and setup/preview
 arrangement remain familiar. Responsive changes bound dialogs and artwork
 popovers, keep controls reachable on short screens, and prevent narrow-screen
 overflow. The existing 1100px setup/preview breakpoint is retained.
@@ -67,6 +65,10 @@ acceptance. The final container acceptance then passed the complete expanded
 suite, including workspace lifecycle checks, in both browsers.
 Additional focused saved-work acceptance explicitly checked export-history
 restore and deletion as well as byte-identical stored-file downloads.
+Those history checks describe the former feature. Export history has since been
+removed: downloads are no longer archived, legacy archives are removed at
+startup, and the current browser suite checks that history controls and the
+history endpoint are absent. Saved presets and manually saved jobs remain.
 
 ```sh
 nix develop .#pdf-app --command scripts/check.sh

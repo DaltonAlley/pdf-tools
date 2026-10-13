@@ -33,6 +33,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref }}
+          submodules: recursive
       - uses: cachix/install-nix-action@v31
       - name: Validate release version
         id: version
@@ -111,8 +112,8 @@ jobs:
               }
               if not $ready { error make {msg: $"($arch) image did not become healthy"} }
               let index = http get --raw --max-time 10sec $url
-              let assets = $index | parse --regex '(?P<name>assets/[a-f0-9]{16}/(?:elm\.js|bridge\.js|app\.css))' | get name | uniq
-              if ($assets | length) != 3 { error make {msg: "Missing versioned frontend bundle"} }
+              let assets = $index | parse --regex '(?P<name>assets/[a-f0-9]{16}/(?:elm\.js|bootstrap\.js|bridge\.js|da-components\.js|app\.css))' | get name | uniq
+              if ($assets | length) != 5 { error make {msg: "Missing versioned frontend bundle"} }
               for asset in $assets { http get --raw --max-time 30sec $"($url)/($asset)" | ignore }
               null
             } catch {|error| $error }

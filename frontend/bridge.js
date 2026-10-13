@@ -1,6 +1,9 @@
 /* Browser-owned resources only. Workflow decisions, validation, forms, HTTP
    jobs, and production geometry belong to Elm/Rust. No secure-context APIs. */
+import { install } from './da-components.js';
+
 export function connect(app) {
+  install(document.getElementById('pdf-ui'));
   const send = event => app.ports.browserEvents.send(event);
   let artworkTrigger;
   const closeArtworkMenu = (restore = false) => {
@@ -99,7 +102,7 @@ export function connect(app) {
   window.addEventListener('resize', stopWorkspaceTransition);
   matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', stopWorkspaceTransition);
   const cache = new Map();
-  let protectedUrls = new Set(), previewController, downloadController, activeSource, restoreFocus, identity = 0;
+  let protectedUrls = new Set(), previewController, downloadController, activeSource, identity = 0;
   let cacheBytes = 0;
   const revoke = key => {
     const asset = cache.get(key);
@@ -232,20 +235,11 @@ export function connect(app) {
       case 'download': void download(command); break;
       case 'theme':
         document.documentElement.dataset.theme = command.value;
-        try { localStorage.setItem('pdf-tools-theme',command.value); } catch (_) {}
         break;
       case 'focus': requestAnimationFrame(() => document.getElementById(command.id)?.focus()); break;
       case 'dialog':
-        restoreFocus = document.activeElement;
-        requestAnimationFrame(() => {
-          const dialog = document.getElementById(command.id);
-          dialog?.showModal();
-          dialog?.querySelector('input, button')?.focus();
-        });
-        break;
       case 'closeDialog':
-        document.getElementById('workspace-dialog')?.close();
-        requestAnimationFrame(() => restoreFocus?.isConnected && restoreFocus.focus());
+        // Da.Dialog's adapter owns modality and focus restoration.
         break;
     }
   });
@@ -280,6 +274,16 @@ export function connect(app) {
     if (event.target.matches?.('.elm-toolbar')) document.querySelectorAll('.elm-toolbar details[open]').forEach(fitPopover);
   },true);
   window.addEventListener('resize',() => document.querySelectorAll('.elm-toolbar details[open]').forEach(fitPopover));
+  // Saving can insert feedback above the toolbar or change the menu contents.
+  // Keep open panels anchored after Elm updates without observing our styles.
+  let popoverFrame;
+  new MutationObserver(() => {
+    if (popoverFrame) return;
+    popoverFrame = requestAnimationFrame(() => {
+      popoverFrame = undefined;
+      document.querySelectorAll('.elm-toolbar > details[open]').forEach(fitPopover);
+    });
+  }).observe(document.querySelector('.elm-shell'), {subtree:true, childList:true, characterData:true});
   // FileList is not a JSON array; keep File objects native and adapt only the
   // browser event payload for Elm's File.decoder.
   document.addEventListener('drop',event => {

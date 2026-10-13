@@ -1,8 +1,9 @@
 module Preview exposing (crop, view)
 
 import Api.Generated as A
+import Da.Button as Button
 import Dict
-import Html exposing (Html, button, div, p, text)
+import Html exposing (Html, div, p, text)
 import Html.Attributes as H
 import Html.Events exposing (onClick, onFocus)
 import Imposition as I
@@ -44,17 +45,12 @@ view m =
                             sheet =
                                 l.parentSheetSize
                         in
-                        S.svg [ SA.class "sheet-svg", SA.viewBox ("-0.3 -0.3 " ++ f (sheet.width + 0.6) ++ " " ++ f (sheet.height + 0.6)), SA.style ("transform: scale(" ++ f m.zoom ++ "); transform-origin:center;"), H.attribute "role" "group", H.attribute "aria-label" "Production sheet" ]
+                        S.svg [ SA.class "sheet-svg", SA.viewBox ("-0.3 -0.3 " ++ f (sheet.width + 0.6) ++ " " ++ f (sheet.height + 0.6)), H.attribute "role" "group", H.attribute "aria-label" "Production sheet" ]
                             (S.rect [ SA.class "sheet-paper", SA.x "0", SA.y "0", SA.width (f sheet.width), SA.height (f sheet.height), SA.fill "white" ] []
                                 :: (List.map (placement m display) l.placements ++ [ guides m display ])
                             )
                 , if m.previewLoading then
                     p [ H.class "preview-cache-status", H.attribute "role" "status" ] [ text "Updating preview…" ]
-
-                  else
-                    text ""
-                , if m.previewError /= "" then
-                    div [ H.class "preview-cache-status", H.attribute "role" "alert" ] [ text m.previewError, button [ H.type_ "button", H.class "ghost-button", H.disabled m.busy, onClick RetryPreview ] [ text "Retry preview" ] ]
 
                   else
                     text ""
@@ -74,7 +70,7 @@ artworkMenu m =
             I.artworkRotation page m.request
 
         action label value =
-            button [ H.type_ "button", H.attribute "role" "menuitem", H.disabled (m.busy || (value == rotation)), onClick (RotateArtwork page value) ] [ text label ]
+            Button.view [ H.attribute "role" "menuitem" ] { variant = Button.Quiet, disabled = m.busy || value == rotation, busy = False, className = "" } label (RotateArtwork page value)
     in
     div [ H.id "artwork-context-menu", H.class "artwork-context-menu", H.attribute "popover" "auto", H.attribute "role" "menu", H.attribute "aria-label" ("Page " ++ String.fromInt page ++ " artwork actions") ]
         [ p [ H.class "artwork-context-heading", H.attribute "role" "presentation" ] [ text ("Page " ++ String.fromInt page ++ " · " ++ String.fromInt rotation ++ "°") ]
