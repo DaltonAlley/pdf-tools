@@ -4444,7 +4444,8 @@ small { color: var(--text-muted); }
 
 #pdf-ui { min-height: 100dvh; }
 #pdf-ui #upload-card { width: 100%; min-height: 260px; display: grid; place-items: center; }
-#pdf-ui .da-theme-toggle { flex: none; }
+#pdf-ui .da-theme-toggle { flex: none; width: 44px; height: 44px; min-height: 44px; }
+#pdf-ui .sheet-item:focus { outline: none; }
 #pdf-ui .da-field { min-width: 0; }
 #pdf-ui .artwork-fitting .da-field-presentation { margin: 0; }
 #pdf-ui .field-grid > .da-field { align-self: stretch; }

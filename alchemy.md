@@ -9,13 +9,13 @@ This document records the durable rules that PDF Tools changes must preserve.
 - **Evidence:** Shared component tests and browser contracts, application compilation and workflow regressions, and asset packaging checks.
 - **Origin:** October 12, 2026 user request for both apps to use DA components to standardize the look of their web apps. Shared component styling supersedes earlier app-specific control styling requirements. The October 13, 2026 screenshot correction requires all selection dropdowns to use the styled DA dropdown.
 
-## INV-SHARED-ELM-BROWSER: Start Elm through the shared OCaml library
+## INV-JAVASCRIPT-BOOTSTRAP: Start Elm with the app's JavaScript bootstrap
 
-- **Scope:** Browser initialization, shared browser features, and frontend builds.
-- **Rule:** Use the independently maintained `elm-browser` OCaml library to mount Elm and attach its browser bridge, as Squire does. Pin the library and Elm companion together as a Git submodule; builds must not depend on a sibling checkout or a competing source copy. Rust serves the generated assets and owns PDF processing; Elm owns application state. Preserve PDF resource lifecycle behavior, saved preferences, and startup Retry. Include the compiled OCaml bootstrap in versioned assets and all development, CI, and container build paths.
-- **Owner:** `frontend/browser/`, `frontend/elm/Main.elm`, `.gitmodules`, and frontend build/packaging configuration.
-- **Evidence:** Optimized frontend build; startup and theme browser acceptance; container checks of all four versioned assets and gzip sidecars.
-- **Origin:** October 12, 2026 user request for both Squire and PDF Tools to use the elm-browser OCaml library for their Elm apps.
+- **Scope:** Browser initialization, theme storage, and frontend builds.
+- **Rule:** Use the application's JavaScript bootstrap to mount Elm and attach its browser ports. Keep its implementation in the repository and include it in all versioned frontend bundles, development builds, CI checks, and container builds. Rust serves the generated assets and owns PDF processing; Elm owns application state. Preserve PDF resource lifecycle behavior, saved preferences, and startup Retry. Builds must not depend on an external bootstrap library or Git submodule.
+- **Owner:** `frontend/browser/bootstrap.js`, `frontend/elm/Main.elm`, and frontend build/packaging configuration.
+- **Evidence:** Bootstrap startup/storage tests, optimized frontend build, startup and theme browser acceptance, and container checks of all five versioned assets and gzip sidecars.
+- **Origin:** October 13, 2026 user request to replace the previous bootstrap package completely with JavaScript.
 
 ## INV-NO-EXPORT-HISTORY: Keep exports out of persistent history
 

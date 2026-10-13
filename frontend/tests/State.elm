@@ -162,7 +162,7 @@ tests =
                     ]
                     ()
             )
-        , test "Shared storage failure keeps the chosen theme and reports that it was not saved"
+        , test "Theme storage failure keeps the chosen theme and reports that it was not saved"
             (\_ ->
                 let
                     changed =
@@ -186,6 +186,21 @@ tests =
         , test "Malformed shared browser responses preserve application state"
             (\_ ->
                 Expect.equal initial (step (SharedBrowserResponse E.null) initial)
+            )
+        , test "Unsupported theme response versions and unrelated errors preserve application state"
+            (\_ ->
+                let
+                    response version id kind =
+                        E.object
+                            [ ( "version", E.int version )
+                            , ( "id", E.string id )
+                            , ( "kind", E.string kind )
+                            , ( "message", E.string "Storage unavailable" )
+                            ]
+                in
+                [ response 2 "theme" "error", response 1 "other" "error", response 1 "theme" "ok" ]
+                    |> List.map (\value -> step (SharedBrowserResponse value) initial)
+                    |> Expect.equal [ initial, initial, initial ]
             )
         , test "Dismissing an error toast retains the failed request and retry state"
             (\_ ->
