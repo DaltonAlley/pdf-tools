@@ -287,7 +287,7 @@ class Suite:
         self.page.locator('.setup-stepper').get_by_role('tab', name=name, exact=True).click()
 
     def dropdown(self, name, value):
-        if name == 'Apply preset':
+        if name == 'Apply preset' and not self.page.locator('.elm-presets-menu .da-popover').is_visible():
             self.presets()
         labels = {
             '12x18': '12 × 18 in', '8.5x11': '8.5 × 11 in',
@@ -317,12 +317,14 @@ class Suite:
             trigger.click()
         menu = self.page.locator('.elm-presets-menu')
         expect(menu.locator('.da-popover')).to_be_visible()
+        expect(trigger).to_have_attribute('aria-expanded', 'true')
         return menu
 
     def close_presets(self):
         trigger = self.page.get_by_role('button', name='Presets', exact=True)
         if trigger.get_attribute('aria-expanded') == 'true':
             trigger.click()
+        expect(self.page.locator('.elm-presets-menu .da-popover')).to_be_hidden()
 
     def assert_pdf(self, path, labels, sizes=None):
         with fitz.open(path) as document:
@@ -1368,21 +1370,20 @@ class Suite:
           for (const key of ['x','y','width','height']) if (hit.getAttribute(key) !== e.getAttribute(key)) throw new Error('Selection does not match selected cut');
           return {outline:getComputedStyle(item).outlineStyle, stroke:style.strokeWidth, effect:style.vectorEffect, color:style.stroke, dash:style.strokeDasharray};
         }''')
-        dark = self.page.locator('html').get_attribute('data-theme') == 'dark'
-        assert style == {'outline':'none','stroke':'2.5px','effect':'non-scaling-stroke','color':'rgb(237, 237, 237)' if dark else 'rgb(32, 32, 32)','dash':'none'}, style
+        assert style == {'outline':'none','stroke':'2.5px','effect':'non-scaling-stroke','color':'rgb(37, 99, 235)','dash':'none'}, style
         halo = self.page.locator('.piece-selection-halo')
-        assert halo.evaluate('e => getComputedStyle(e).stroke') == ('rgb(23, 23, 23)' if dark else 'rgb(255, 255, 255)')
+        assert halo.evaluate('e => getComputedStyle(e).stroke') == 'rgb(255, 255, 255)'
         expect(selection).to_have_count(1)
         expect(self.page.locator('.piece-selection-halo')).to_have_count(1)
         assert self.page.locator('.sheet-item[data-selected=true]').count() == 1
         self.page.screenshot(path=str(self.out/'impression-selection.png'))
         self.toggle_theme()
         second.focus()
-        expect(selection).to_have_css('stroke', 'rgb(32, 32, 32)' if dark else 'rgb(237, 237, 237)')
-        expect(halo).to_have_css('stroke', 'rgb(255, 255, 255)' if dark else 'rgb(23, 23, 23)')
+        expect(selection).to_have_css('stroke', 'rgb(37, 99, 235)')
+        expect(halo).to_have_css('stroke', 'rgb(255, 255, 255)')
         self.page.screenshot(path=str(self.out/'impression-selection-light.png'))
         self.toggle_theme()
-        self.checks.append('impression selection: one selected repeated copy, pointer/keyboard/open context menu and focus return, neutral 2.5px outline with contrasting border in both themes, exact cut geometry, no native SVG focus ring, light/dark screenshots')
+        self.checks.append('impression selection: one selected repeated copy, pointer/keyboard/open context menu and focus return, blue 2.5px outline with contrasting border in both themes, exact cut geometry, no native SVG focus ring, light/dark screenshots')
 
 
 
