@@ -1,6 +1,17 @@
-module View exposing (view)
+module View exposing (dropdownSubscriptions, revealDropdown, view)
 
 import Api.Generated as A
+import Da.Button as Button
+import Da.Card as Card
+import Da.Dialog as Dialog
+import Da.Dropdown as Dropdown
+import Da.Feedback as Feedback
+import Da.Field as DaField
+import Da.FileList as FileList
+import Da.Menu as Menu
+import Da.Popover as Popover
+import Da.Theme as Theme
+import Da.ThemeToggle as ThemeToggle
 import Dict
 import File
 import Html exposing (..)
@@ -16,90 +27,249 @@ import Svg.Attributes as SA
 import Validation as V
 
 
+toolSelector : Model -> Html Msg
+toolSelector m =
+    nav [ class "app-brand app-tool-selector", attribute "aria-label" "Tools" ]
+        [ DaField.present DaField.Compact [] (dropdownView (toolDropdown m)) ]
+
+
 btn : String -> Msg -> Html Msg
 btn title message =
-    button [ type_ "button", class "ghost-button", onClick message ] [ text title ]
+    Button.content [] { variant = Button.Secondary, disabled = False, busy = False, className = "ghost-button" } [ text title ] message
 
 
 primary : String -> Msg -> Bool -> Html Msg
 primary title message blocked =
-    button [ type_ "button", class "primary-button", onClick message, disabled blocked ] [ text title ]
+    Button.content [] { variant = Button.Primary, disabled = blocked, busy = False, className = "primary-button" } [ text title ] message
+
+
+setupArrow : Bool -> Html Msg
+setupArrow forward =
+    Svg.svg [ SA.viewBox "0 0 24 24", SA.width "20", SA.height "20", attribute "aria-hidden" "true", attribute "focusable" "false" ]
+        [ Svg.path
+            [ SA.d
+                (if forward then
+                    "M5 12h14m-6-6 6 6-6 6"
+
+                 else
+                    "M19 12H5m6-6-6 6 6 6"
+                )
+            , SA.fill "none"
+            , SA.stroke "currentColor"
+            , SA.strokeWidth "2"
+            , SA.strokeLinecap "round"
+            , SA.strokeLinejoin "round"
+            ]
+            []
+        ]
 
 
 choices : String -> String -> String -> List ( String, String ) -> Html Msg
 choices title key selected options =
-    div [ class "field" ]
-        [ span [] [ text title ]
-        , div [ class "segmented-control", attribute "role" "group", attribute "aria-label" title ]
-            (List.map
-                (\( v, t ) ->
-                    button
-                        [ type_ "button"
-                        , attribute "aria-pressed"
-                            (if v == selected then
-                                "true"
+    DaField.segmented []
+        (DaField.config key title)
+        { value = selected, onSelect = Field key, options = fieldOptions options }
 
-                             else
-                                "false"
-                            )
-                        , onClick (Field key v)
-                        ]
-                        [ text t ]
+
+fieldOptions : List ( String, String ) -> List DaField.SelectOption
+fieldOptions =
+    List.map (\( value, title ) -> { value = value, label = title, disabled = False })
+
+
+dropdownControl : Model -> DaField.Config -> String -> List ( String, String ) -> ( DaField.Config, Dropdown.Control Msg )
+dropdownControl m config selected options =
+    ( config
+    , { value = selected
+      , state = Dict.get config.id m.dropdowns |> Maybe.withDefault Dropdown.initial
+      , options = fieldOptions options
+      , onChange = DropdownChanged config.id selected
+      }
+    )
+
+
+toolDropdown : Model -> ( DaField.Config, Dropdown.Control Msg )
+toolDropdown m =
+    let
+        config =
+            DaField.config "tool" "Tool"
+    in
+    dropdownControl m { config | disabled = m.busy } (operationLabel m.operation) (List.map (\op -> ( operationLabel op, operationLabel op )) (operations m.files))
+
+
+orientationDropdown : Model -> ( DaField.Config, Dropdown.Control Msg )
+orientationDropdown m =
+    let
+        config =
+            DaField.config "finished-orientation" "Finished orientation"
+    in
+    dropdownControl m
+        { config | disabled = m.busy || not (m.chosenWidth && m.chosenHeight) || Dict.member "invalid:finished-width" m.drafts || Dict.member "invalid:finished-height" m.drafts }
+        (if m.request.finishedCutSize.width > m.request.finishedCutSize.height then
+            "landscape"
+
+         else
+            "portrait"
+        )
+        [ ( "portrait", "Portrait" ), ( "landscape", "Landscape" ) ]
+
+
+sheetDropdown : Model -> ( DaField.Config, Dropdown.Control Msg )
+sheetDropdown m =
+    dropdownControl m
+        (DaField.config "sheet" "Print sheet size")
+        (if Dict.member "sheet-custom" m.drafts then
+            "custom"
+
+         else
+            sheetName m.request.parentSheetSize
+        )
+        [ ( "12x18", "12 × 18 in" ), ( "8.5x11", "8.5 × 11 in" ), ( "11x17", "11 × 17 in" ), ( "13x19", "13 × 19 in" ), ( "custom", "Custom size" ) ]
+
+
+printingDropdown : Model -> ( DaField.Config, Dropdown.Control Msg )
+printingDropdown m =
+    let
+        ( config, control ) =
+            dropdownControl m
+                (DaField.config "sides" "Printing")
+                (if m.request.sides == A.SidesDouble then
+                    "double"
+
+                 else
+                    "single"
                 )
-                options
-            )
-        ]
+                [ ( "single", "Single-sided" ), ( "double", "Double-sided" ) ]
+    in
+    ( config
+    , { control | options = List.map (\option -> { option | disabled = option.value == "double" && modBy 2 (Maybe.withDefault 1 m.request.sourcePageCount) /= 0 }) control.options }
+    )
 
 
-selectField : String -> String -> String -> List ( String, String ) -> Html Msg
-selectField title key selected options =
-    label [ class "field" ] [ span [] [ text title ], select [ attribute "aria-label" title, value selected, onInput (Field key) ] (List.map (\( v, t ) -> option [ value v, Html.Attributes.selected (v == selected) ] [ text t ]) options) ]
+flipDropdown : Model -> ( DaField.Config, Dropdown.Control Msg )
+flipDropdown m =
+    dropdownControl m
+        (DaField.config "flip" "Duplex flip edge")
+        (if Maybe.map .flipEdge m.request.duplex == Just A.DuplexFlipEdgeShortEdge then
+            "shortEdge"
+
+         else
+            "longEdge"
+        )
+        [ ( "longEdge", "Long edge" ), ( "shortEdge", "Short edge" ) ]
+
+
+presetDropdown : Model -> ( DaField.Config, Dropdown.Control Msg )
+presetDropdown m =
+    dropdownControl m
+        (DaField.config "apply-preset" "Apply preset")
+        (Maybe.withDefault "" m.editingPreset)
+        (( "", "Choose a preset" ) :: List.map (\preset -> ( preset.id, preset.name )) m.presets)
+
+
+dropdownView : ( DaField.Config, Dropdown.Control Msg ) -> Html Msg
+dropdownView ( config, control ) =
+    Dropdown.view [] config control
+
+
+visibleDropdowns : Model -> List ( DaField.Config, Dropdown.Control Msg )
+visibleDropdowns m =
+    if List.isEmpty m.files then
+        []
+
+    else
+        toolDropdown m
+            :: (if m.operation == Impose && m.source /= Nothing then
+                    (if m.presetsOpen then
+                        [ presetDropdown m ]
+
+                     else
+                        []
+                    )
+                        ++ (if m.rail == "preview" then
+                                []
+
+                            else if m.step == 0 then
+                                [ orientationDropdown m ]
+
+                            else if m.step == 1 then
+                                [ sheetDropdown m, printingDropdown m ]
+                                    ++ (if m.request.sides == A.SidesDouble then
+                                            [ flipDropdown m ]
+
+                                        else
+                                            []
+                                       )
+
+                            else
+                                []
+                           )
+
+                else
+                    []
+               )
+
+
+dropdownSubscriptions : Model -> Sub Msg
+dropdownSubscriptions m =
+    visibleDropdowns m |> List.map (\( config, control ) -> Dropdown.subscriptions config control) |> Sub.batch
+
+
+revealDropdown : String -> Model -> Cmd Msg
+revealDropdown key m =
+    visibleDropdowns m
+        |> List.filter (\( config, _ ) -> config.id == key)
+        |> List.map (\( config, control ) -> Dropdown.reveal config.id control (\_ -> NoOp))
+        |> Cmd.batch
 
 
 check : String -> String -> Bool -> Html Msg
 check title key state =
-    label [ class "field checkbox-field" ] [ input [ type_ "checkbox", checked state, onCheck (\_ -> Toggle key) ] [], span [] [ text title ] ]
+    DaField.checkbox []
+        (DaField.config key title)
+        { checked = state, onCheck = \_ -> Toggle key }
 
 
 numberField : Model -> String -> String -> Float -> Html Msg
 numberField m title key n =
     let
-        invalid =
-            Dict.get ("invalid:" ++ key) m.drafts
+        config =
+            DaField.config key title
+
+        draft =
+            Dict.get key m.drafts
+                |> Maybe.withDefault
+                    (if (key == "finished-width" && not m.chosenWidth) || (key == "finished-height" && not m.chosenHeight) then
+                        ""
+
+                     else
+                        String.fromFloat n
+                    )
     in
-    label [ class "field" ]
-        [ span [] [ text title ]
-        , input
-            [ id key
-            , attribute "aria-label" title
-            , type_ "text"
-            , attribute "inputmode" "decimal"
-            , value
-                (Dict.get key m.drafts
-                    |> Maybe.withDefault
-                        (if (key == "finished-width" && not m.chosenWidth) || (key == "finished-height" && not m.chosenHeight) then
-                            ""
+    DaField.input []
+        { config | error = Dict.get ("invalid:" ++ key) m.drafts }
+        { value = draft, onInput = Field key, kind = DaField.Decimal }
 
-                         else
-                            String.fromFloat n
-                        )
-                )
-            , onInput (Field key)
-            , attribute "aria-invalid"
-                (if invalid /= Nothing then
-                    "true"
 
-                 else
-                    "false"
-                )
-            ]
-            []
-        , small [ class "field-error" ] [ text (Maybe.withDefault "" invalid) ]
-        ]
+textField : String -> String -> String -> (String -> Msg) -> Html Msg
+textField key title draft change =
+    DaField.input [] (DaField.config key title) { value = draft, onInput = change, kind = DaField.Text }
 
 
 view : Model -> Html Msg
 view m =
+    Theme.root
+        (if m.theme == "dark" then
+            Theme.Dark
+
+         else
+            Theme.Light
+        )
+        (id "pdf-ui" :: Theme.accent "#2563eb")
+        [ appView m ]
+
+
+appView : Model -> Html Msg
+appView m =
     main_ [ classList [ ( "shell", True ), ( "elm-shell", True ), ( "empty-shell", List.isEmpty m.files ), ( "generic-shell", m.operation /= Impose ) ], preventDefaultOn "dragover" (D.succeed ( NoOp, True )), on "elm-files" (D.map Dropped (D.field "detail" (D.list File.decoder))) ]
         [ if List.isEmpty m.files then
             text ""
@@ -112,32 +282,14 @@ view m =
           else
             section [ classList [ ( "ready-shell", True ), ( "generic-ready", m.operation /= Impose ) ] ]
                 [ section [ classList [ ( "ready-card", True ), ( "imposing", m.operation == Impose ) ] ]
-                    [ nav [ class "operation-chooser", attribute "aria-label" "PDF tools" ]
-                        (List.map
-                            (\op ->
-                                button
-                                    [ type_ "button"
-                                    , attribute "aria-pressed"
-                                        (if m.operation == op then
-                                            "true"
-
-                                         else
-                                            "false"
-                                        )
-                                    , disabled m.busy
-                                    , onClick (Switch op)
-                                    ]
-                                    [ text (Model.operationLabel op) ]
-                            )
-                            (operations m.files)
-                        )
-                    , if m.operation == Impose then
+                    [ if m.operation == Impose then
                         imposeView m
 
                       else
                         genericView m
                     ]
                 ]
+        , statusView m
         , if m.dialog == "" then
             text ""
 
@@ -149,80 +301,43 @@ view m =
 headerView : Model -> Html Msg
 headerView m =
     header [ class "app-header" ]
-        [ div [ class "app-brand" ] [ strong [] [ text "PDF Tools" ] ]
-        , div [ class "app-file-context" ]
-            [ span [] [ text "Current file" ]
-            , strong [ title (List.map (.file >> File.name) m.files |> String.join ", ") ]
-                [ text
-                    (if List.length m.files == 1 then
-                        List.head m.files |> Maybe.map (.file >> File.name) |> Maybe.withDefault ""
+        [ toolSelector m
+        , workspaceActions m
+        ]
 
-                     else
-                        String.fromInt (List.length m.files) ++ " files"
-                    )
-                ]
-            , small [] [ text (String.fromInt (List.sum (List.map (.file >> File.size) m.files) // 1024) ++ " KB") ]
-            ]
-        , div [ class "app-header-actions" ]
-            [ button
-                [ class "ghost-button"
-                , disabled m.busy
-                , onClick (Browse True)
-                , attribute "aria-label"
-                    (if m.operation == Impose then
-                        "Add artwork"
 
-                     else
-                        "Add files"
-                    )
-                ]
-                [ span [ class "button-label-wide" ]
-                    [ text
-                        (if m.operation == Impose then
-                            "Add artwork"
+workspaceActions : Model -> Html Msg
+workspaceActions m =
+    let
+        base =
+            Menu.config "workspace-actions" "Workspace actions" "workspace-actions-trigger" (SetWorkspaceMenu False)
 
-                         else
-                            "Add files"
-                        )
-                    ]
-                , span [ class "button-label-short", attribute "aria-hidden" "true" ] [ text "Add" ]
-                ]
-            , button
-                [ class "ghost-button"
-                , disabled m.busy
-                , onClick (Browse False)
-                , attribute "aria-label"
-                    (if m.operation == Impose then
-                        "Replace artwork"
+        config =
+            { base | open = m.workspaceMenu }
 
-                     else
-                        "Replace files"
-                    )
-                ]
-                [ span [ class "button-label-wide" ]
-                    [ text
-                        (if m.operation == Impose then
-                            "Replace artwork"
+        fileLabel =
+            if m.operation == Impose then
+                "artwork"
 
-                         else
-                            "Replace files"
-                        )
-                    ]
-                , span [ class "button-label-short", attribute "aria-hidden" "true" ] [ text "Replace" ]
-                ]
-            , button [ id "clear-workspace-trigger", class "clear-workspace-button", disabled m.busy, onClick (OpenDialog "clear") ] [ text "Clear" ]
-            , themeToggle m
+            else
+                "files"
+    in
+    div [ class "app-header-actions" ]
+        [ Menu.trigger [] config "Workspace" (SetWorkspaceMenu (not m.workspaceMenu))
+        , themeToggle m
+        , Menu.view []
+            config
+            [ { id = "add", label = "Add " ++ fileLabel, disabled = m.busy, onSelect = WorkspaceAction "add" }
+            , { id = "replace", label = "Replace " ++ fileLabel, disabled = m.busy, onSelect = WorkspaceAction "replace" }
+            , { id = "clear", label = "Clear workspace", disabled = m.busy, onSelect = WorkspaceAction "clear" }
             ]
         ]
 
 
 themeToggle : Model -> Html Msg
 themeToggle m =
-    button
-        [ type_ "button"
-        , class "theme-toggle"
-        , attribute "role" "switch"
-        , attribute "aria-label" "Dark mode"
+    ThemeToggle.view
+        [ attribute "role" "switch"
         , attribute "aria-checked"
             (if m.theme == "dark" then
                 "true"
@@ -230,140 +345,143 @@ themeToggle m =
              else
                 "false"
             )
-        , title
-            (if m.theme == "dark" then
-                "Switch to light mode"
-
-             else
-                "Switch to dark mode"
-            )
-        , onClick (Toggle "theme")
         ]
-        [ Svg.svg
-            [ SA.class "ui-icon theme-toggle-icon"
-            , SA.viewBox "0 0 24 24"
-            , SA.width "20"
-            , SA.height "20"
-            , SA.fill "none"
-            , SA.stroke "currentColor"
-            , attribute "aria-hidden" "true"
-            ]
-            (if m.theme == "dark" then
-                [ Svg.path [ SA.d "M20.9 13.3A9 9 0 0 1 10.7 3.1 9 9 0 1 0 20.9 13.3Z" ] [] ]
+        { mode =
+            if m.theme == "dark" then
+                Theme.Dark
 
-             else
-                [ Svg.circle [ SA.cx "12", SA.cy "12", SA.r "4" ] []
-                , Svg.path [ SA.d "M12 2v2m0 16v2M2 12h2m16 0h2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42" ] []
-                ]
-            )
-        ]
+            else
+                Theme.Light
+        , label = "Dark mode"
+        , onChange = \_ -> Toggle "theme"
+        }
 
 
 statusView : Model -> Html Msg
 statusView m =
-    div [ class "elm-status" ]
-        [ if m.busy then
-            div [ class "progress-status", attribute "role" "status" ]
-                [ div [] [ span [] [ text m.phase ], strong [] [ text (String.fromInt m.progress ++ "%") ] ]
-                , progress [ value (String.fromInt m.progress), Html.Attributes.max "100" ] []
-                , btn
-                    (if m.phase == "Checking PDFs" then
-                        "Cancel inspection"
+    Keyed.node "aside"
+        [ class "toast-region", attribute "aria-label" "Notifications" ]
+        ([ if m.busy then
+            Just
+                ( "progress"
+                , div [ class "toast toast-progress" ]
+                    [ div [ class "toast-progress-label", attribute "role" "status", attribute "aria-atomic" "true" ]
+                        [ span [] [ text m.phase ], span [] [ text (String.fromInt m.progress ++ "%") ] ]
+                    , Feedback.progress [] { label = m.phase, value = Just m.progress }
+                    , Button.content []
+                        { variant = Button.Secondary, disabled = False, busy = False, className = "toast-action" }
+                        [ text
+                            (if m.phase == "Checking PDFs" then
+                                "Cancel inspection"
 
-                     else
-                        "Cancel"
+                             else
+                                "Cancel"
+                            )
+                        ]
+                        Cancel
+                    ]
+                )
+
+           else
+            Nothing
+         , m.toast
+            |> Maybe.map
+                (\toast ->
+                    ( String.fromInt toast.id
+                    , div [ class "toast" ]
+                        [ p
+                            [ attribute "role"
+                                (if List.member toast.kind [ "error", "preview" ] then
+                                    "alert"
+
+                                 else
+                                    "status"
+                                )
+                            , attribute "aria-atomic" "true"
+                            ]
+                            [ text toast.message ]
+                        , div [ class "toast-actions" ]
+                            [ if List.member toast.kind [ "error", "cancel", "preview" ] then
+                                Button.content []
+                                    { variant = Button.Secondary, disabled = m.busy, busy = False, className = "toast-action" }
+                                    [ text
+                                        (if toast.kind == "preview" then
+                                            "Retry preview"
+
+                                         else
+                                            "Retry"
+                                        )
+                                    ]
+                                    (if toast.kind == "preview" then
+                                        RetryPreview
+
+                                     else
+                                        Retry
+                                    )
+
+                              else
+                                text ""
+                            , Button.content [ attribute "aria-label" "Dismiss notification" ] { variant = Button.Quiet, disabled = False, busy = False, className = "toast-dismiss" } [ text "×" ] (DismissToast toast.id)
+                            ]
+                        ]
                     )
-                    Cancel
-                ]
-
-          else
-            text ""
-        , if m.error /= "" then
-            div [ class "error", attribute "role" "alert" ] [ p [] [ text m.error ], btn "Retry" Retry ]
-
-          else
-            text ""
-        , if m.notice /= "" then
-            div [ class "export-notice", attribute "role" "status" ]
-                [ text m.notice
-                , if String.startsWith "Cancelled" m.notice then
-                    btn "Retry" Retry
-
-                  else
-                    text ""
-                ]
-
-          else
-            text ""
-        ]
+                )
+         ]
+            |> List.filterMap identity
+        )
 
 
 emptyView : Model -> Html Msg
 emptyView m =
-    section [ class "empty-state" ] [ themeToggle m, div [ class "empty-state-content" ] [ div [ class "empty-intro" ] [ p [ class "eyebrow" ] [ text "PDF Tools" ], h1 [] [ text "Upload files" ] ], button [ id "browse-files", class "primary-button", disabled m.busy, onClick (Browse False) ] [ text "Browse files" ], p [ id "empty-state-description" ] [ text "PDF, PNG, or JPEG. Drop files here to begin." ], statusView m ] ]
+    div [ class "home-view" ]
+        [ div [ class "home-content" ]
+            [ header [ class "home-header" ] [ h1 [] [ text "PDF Tools" ], themeToggle m ]
+            , Card.view [ id "upload-card", attribute "aria-label" "Upload files" ]
+                [ div [ class "empty-state-content" ]
+                    [ div [ class "empty-intro" ] [ h2 [] [ text "Drop your files here" ] ]
+                    , Button.content [ id "browse-files", attribute "aria-describedby" "empty-state-description" ] { variant = Button.Primary, disabled = m.busy, busy = False, className = "primary-button" } [ text "Browse files" ] (Browse False)
+                    , p [ id "empty-state-description", class "empty-formats" ] [ text "PDF, PNG, and JPEG supported" ]
+                    ]
+                ]
+            ]
+        ]
 
 
 queueView : Model -> Html Msg
 queueView m =
     section [ class "file-queue", attribute "aria-label" "Selected files" ]
-        [ div [ class "file-queue-head" ] [ h2 [] [ text "Files" ], small [] [ text "Drag or use the arrow buttons to reorder." ] ]
-        , Keyed.node "div"
-            [ class "file-list" ]
-            (List.indexedMap
-                (\i f ->
-                    ( String.fromInt f.id
-                    , div
-                        [ id ("file-row-" ++ String.fromInt f.id)
-                        , tabindex 0
-                        , class "file-row"
-                        , draggable "true"
-                        , on "dragstart" (D.succeed (Drag f.id))
-                        , preventDefaultOn "dragover" (D.succeed ( NoOp, True ))
-                        , stopPropagationOn "drop" (D.succeed ( DropOn f.id, True ))
-                        , preventDefaultOn "keydown"
-                            (D.map2
-                                (\key alt ->
-                                    if alt && List.member key [ "ArrowUp", "ArrowDown" ] then
-                                        ( Move f.id
-                                            (if key == "ArrowUp" then
-                                                -1
+        [ div [ class "file-queue-head" ]
+            [ div [ class "queue-heading" ] [ h2 [] [ text "Files" ], span [ class "count-badge" ] [ text (String.fromInt (List.length m.files)) ] ]
+            ]
+        , FileList.view [ style "--file-count" (String.fromInt (List.length m.files)) ]
+            { id = "file-queue", label = "Selected files", moveUp = "Move up", moveDown = "Move down", remove = "Remove" }
+            { items =
+                List.map
+                    (\f ->
+                        { id = String.fromInt f.id
+                        , name = File.name f.file
+                        , detail =
+                            Just
+                                (if isPdf f.file then
+                                    String.fromInt f.pages
+                                        ++ (if f.pages == 1 then
+                                                " page"
 
-                                             else
-                                                1
-                                            )
-                                        , True
-                                        )
+                                            else
+                                                " pages"
+                                           )
 
-                                    else
-                                        ( NoOp, False )
+                                 else
+                                    "300 DPI"
                                 )
-                                (D.field "key" D.string)
-                                (D.field "altKey" D.bool)
-                            )
-                        ]
-                        [ span [ class "file-order" ] [ text (String.fromInt (i + 1)) ]
-                        , div [ class "file-meta" ]
-                            [ span [ title (File.name f.file) ] [ text (File.name f.file) ]
-                            , small []
-                                [ text
-                                    (if isPdf f.file then
-                                        String.fromInt f.pages ++ " pages"
-
-                                     else
-                                        "300 DPI"
-                                    )
-                                ]
-                            ]
-                        , div [ class "file-row-actions" ]
-                            [ button [ type_ "button", class "icon-button", disabled (m.busy || i == 0), attribute "aria-label" ("Move " ++ File.name f.file ++ " up"), onClick (Move f.id -1) ] [ text "↑" ]
-                            , button [ type_ "button", class "icon-button", disabled (m.busy || i == List.length m.files - 1), attribute "aria-label" ("Move " ++ File.name f.file ++ " down"), onClick (Move f.id 1) ] [ text "↓" ]
-                            , button [ type_ "button", class "icon-button remove-file", disabled m.busy, attribute "aria-label" ("Remove " ++ File.name f.file), onClick (Remove f.id) ] [ text "×" ]
-                            ]
-                        ]
+                        }
                     )
-                )
-                m.files
-            )
+                    m.files
+            , state = m.fileOrder
+            , disabled = m.busy
+            , onChange = Reordered
+            , onRemove = \id -> String.toInt id |> Maybe.map Remove |> Maybe.withDefault NoOp
+            }
         ]
 
 
@@ -380,22 +498,21 @@ pageChoices m =
     div [ class "page-selection" ]
         [ div [ class "field" ]
             [ span [] [ text "Pages" ]
-            , div [ class "segmented-control" ]
-                [ button
-                    [ type_ "button"
-                    , attribute "aria-pressed"
+            , div [ class "page-selection-actions" ]
+                [ Button.content
+                    [ attribute "aria-pressed"
                         (if current == "all" then
                             "true"
 
                          else
                             "false"
                         )
-                    , onClick (Field "pages" "all")
                     ]
+                    { variant = Button.Secondary, disabled = False, busy = False, className = "" }
                     [ text "All pages" ]
-                , button
+                    (Field "pages" "all")
+                , Button.content
                     [ id "range-trigger"
-                    , type_ "button"
                     , attribute "aria-haspopup" "dialog"
                     , attribute "aria-pressed"
                         (if current /= "all" then
@@ -404,9 +521,10 @@ pageChoices m =
                          else
                             "false"
                         )
-                    , onClick (OpenDialog "range")
                     ]
+                    { variant = Button.Secondary, disabled = False, busy = False, className = "" }
                     [ text "Page range" ]
+                    (OpenDialog "range")
                 ]
             , if current /= "all" then
                 small [] [ text current ]
@@ -458,15 +576,21 @@ genericView m =
                     [ pageChoices m
                     , choices "Output" "output" m.outputMode [ ( "individual", "Individual" ), ( "combined", "Combined" ), ( "chunks", "Chunks" ) ]
                     , if m.outputMode == "chunks" then
-                        label [ class "field" ]
-                            [ span [] [ text "Pages per chunk" ]
-                            , input [ id "extract-chunk-size", type_ "text", attribute "inputmode" "numeric", value m.chunk, onInput (Field "chunk") ] []
-                            , if validChunk then
-                                small [] [ text "Consecutive groups of selected pages." ]
+                        let
+                            config =
+                                DaField.config "extract-chunk-size" "Pages per chunk"
+                        in
+                        DaField.input []
+                            { config
+                                | description = Just "Consecutive groups of selected pages."
+                                , error =
+                                    if validChunk then
+                                        Nothing
 
-                              else
-                                small [ class "field-error", attribute "role" "alert" ] [ text "Enter a whole number from 1 to 1000." ]
-                            ]
+                                    else
+                                        Just "Enter a whole number from 1 to 1000."
+                            }
+                            { value = m.chunk, onInput = Field "chunk", kind = DaField.Integer }
 
                       else
                         text ""
@@ -496,7 +620,13 @@ genericView m =
                 _ ->
                     "Download PDF"
     in
-    div [ class "workspace-grid ordered-files" ] [ queueView m, Html.form [ class "tool-form", onSubmit Submit ] [ div [ class "tool-form-head" ] [ h2 [ id "operation-settings-heading" ] [ text (Model.operationLabel m.operation) ] ], fieldset [ class "tool-form-fields", disabled m.busy ] fields, div [ class "submit-row" ] [ primary action Submit (m.busy || not validPages || not validChunk), statusView m ] ] ]
+    div [ classList [ ( "workspace-grid ordered-files", True ), ( "file-action-workspace", List.member m.operation [ Merge, ImagePdf ] ) ] ]
+        [ queueView m
+        , Html.form [ class "tool-form", attribute "aria-label" (Model.operationLabel m.operation ++ " settings"), onSubmit Submit ]
+            [ fieldset [ class "tool-form-fields", disabled m.busy ] fields
+            , div [ class "submit-row" ] [ Button.submitContent [] { variant = Button.Primary, disabled = m.busy || not validPages || not validChunk, busy = False, className = "primary-button" } [ text action ] ]
+            ]
+        ]
 
 
 setupValid : Model -> Bool
@@ -522,8 +652,7 @@ imposeView m =
                 "pending"
             )
         ]
-        [ statusView m
-        , if m.source == Nothing then
+        [ if m.source == Nothing then
             div [ class "impose-preparation-region" ]
                 [ p [] [ text "Prepare your selected artwork to open the sheet." ]
                 , if not m.busy then
@@ -534,9 +663,9 @@ imposeView m =
                 ]
 
           else
-            div [ classList [ ( "gang-grid", True ), ( "elm-impose-grid", True ), ( "elm-collapsed", m.collapsed ), ( "elm-preview-active", m.rail == "preview" ) ] ]
+            div [ classList [ ( "gang-grid", True ), ( "elm-impose-grid", True ), ( "elm-preview-active", m.rail == "preview" ) ] ]
                 [ div [ class "gang-rail-switcher", attribute "role" "tablist", attribute "aria-label" "Imposition workspace sections" ]
-                    [ button
+                    [ Button.content
                         [ id "gang-setup-tab"
                         , attribute "role" "tab"
                         , attribute "aria-selected"
@@ -546,10 +675,11 @@ imposeView m =
                              else
                                 "false"
                             )
-                        , onClick (SetRail "setup")
                         ]
+                        { variant = Button.Secondary, disabled = False, busy = False, className = "" }
                         [ text "Setup" ]
-                    , button
+                        (SetRail "setup")
+                    , Button.content
                         [ id "gang-preview-tab"
                         , attribute "role" "tab"
                         , attribute "aria-selected"
@@ -559,9 +689,10 @@ imposeView m =
                              else
                                 "false"
                             )
-                        , onClick (SetRail "preview")
                         ]
+                        { variant = Button.Secondary, disabled = False, busy = False, className = "" }
                         [ text "Preview" ]
+                        (SetRail "preview")
                     ]
                 , setupView m
                 , toolbarView m
@@ -577,16 +708,16 @@ setupTabKey index =
             (\key ->
                 case key of
                     "ArrowRight" ->
-                        D.succeed ( SetStep (modBy 4 (index + 1)), True )
+                        D.succeed ( SetStep (modBy 3 (index + 1)), True )
 
                     "ArrowLeft" ->
-                        D.succeed ( SetStep (modBy 4 (index - 1)), True )
+                        D.succeed ( SetStep (modBy 3 (index - 1)), True )
 
                     "Home" ->
                         D.succeed ( SetStep 0, True )
 
                     "End" ->
-                        D.succeed ( SetStep 3, True )
+                        D.succeed ( SetStep 2, True )
 
                     _ ->
                         D.fail "Not a setup tab navigation key"
@@ -600,7 +731,7 @@ setupView m =
             m.request
 
         title =
-            List.drop m.step [ "Size", "Quantity & sheet", "Arrangement", "Bleed" ] |> List.head |> Maybe.withDefault "Size"
+            List.drop m.step [ "Size", "Sheet", "Bleed" ] |> List.head |> Maybe.withDefault "Size"
 
         manual =
             Maybe.withDefault { rows = 1, columns = 1, rotationDegrees = 0, margins = Nothing } r.manual
@@ -611,89 +742,25 @@ setupView m =
         source =
             Maybe.map .analysis m.source
 
+        detectedBleed =
+            source |> Maybe.map .likelyBleed
+
+        hasDetectedBleed =
+            detectedBleed |> Maybe.map .detected |> Maybe.withDefault False
+
+        detectedAmount =
+            detectedBleed |> Maybe.map .amountPerSide |> Maybe.withDefault 0
+
+        bleedAmount =
+            Maybe.withDefault detectedAmount r.sourceBleedOverride
+
         controls =
             case m.step of
                 0 ->
                     [ h3 [] [ text "Finished size" ]
-                    , div [ class "field-grid two" ] [ numberField m "Finished width (in)" "finished-width" r.finishedCutSize.width, numberField m "Finished height (in)" "finished-height" r.finishedCutSize.height ]
-                    , fieldset [ disabled (not (m.chosenWidth && m.chosenHeight) || Dict.member "invalid:finished-width" m.drafts || Dict.member "invalid:finished-height" m.drafts) ]
-                        [ selectField "Finished orientation"
-                            "finished-orientation"
-                            (if r.finishedCutSize.width > r.finishedCutSize.height then
-                                "landscape"
-
-                             else
-                                "portrait"
-                            )
-                            [ ( "portrait", "Portrait" ), ( "landscape", "Landscape" ) ]
-                        ]
-                    , if not m.chosenWidth || not m.chosenHeight then
-                        p [ class "field-help" ] [ text "Choose both finished dimensions or apply a preset." ]
-
-                      else
-                        text ""
-                    , details [] [ summary [] [ text "Presets" ], savedView m ]
-                    , section [ class "impose-source-summary" ] [ p [] [ text (String.fromInt (Maybe.withDefault 0 r.sourcePageCount) ++ " pages") ], details [] [ summary [] [ text "Detected artwork details" ], p [] [ text (Maybe.map (\a -> String.fromFloat a.sourcePdfSize.width ++ " × " ++ String.fromFloat a.sourcePdfSize.height ++ " in · " ++ String.fromInt a.orientationAdjustedPages ++ " orientation corrections") source |> Maybe.withDefault "") ], ul [] (Maybe.map (.sourcePages >> List.indexedMap (\i p -> li [] [ text (String.fromInt (i + 1) ++ ": " ++ Maybe.withDefault "Artwork" p.filename ++ " · " ++ String.fromFloat p.sourcePdfSize.width ++ " × " ++ String.fromFloat p.sourcePdfSize.height ++ " in") ])) source |> Maybe.withDefault []) ] ]
-                    , details [] [ summary [] [ text "Artwork files" ], queueView m ]
-                    , choices "How should these pages print?"
-                        "mode"
-                        (if r.impositionMode == A.ImpositionModeRepeat then
-                            "repeat"
-
-                         else
-                            "unique"
-                        )
-                        [ ( "repeat", "Repeat pages" ), ( "unique", "Use each page once" ) ]
-                    ]
-
-                1 ->
-                    [ h3 [] [ text "Quantity and sheet" ]
-                    , if r.impositionMode == A.ImpositionModeRepeat then
-                        div [ class "repeat-quantity-section" ]
-                            [ h3 [] [ text "Copy quantities" ]
-                            , p [] [ text (String.fromInt r.quantityRequested ++ " total impressions") ]
-                            , if List.length (I.quantities r) == 1 then
-                                numberField m "Copies" "copies" (toFloat r.quantityRequested)
-
-                              else
-                                button [ id "edit-copy-quantities", class "ghost-button", onClick (OpenDialog "quantities") ] [ text "Edit copy quantities" ]
-                            ]
-
-                      else
-                        text ""
-                    , selectField "Print sheet size"
-                        "sheet"
-                        (if Dict.member "sheet-custom" m.drafts then
-                            "custom"
-
-                         else
-                            sheetName r.parentSheetSize
-                        )
-                        [ ( "12x18", "12 × 18 in" ), ( "8.5x11", "8.5 × 11 in" ), ( "11x17", "11 × 17 in" ), ( "13x19", "13 × 19 in" ), ( "custom", "Custom size" ) ]
-                    , if Dict.member "sheet-custom" m.drafts || sheetName r.parentSheetSize == "custom" then
-                        div [ class "field-grid two" ] [ numberField m "Sheet width (in)" "sheet-width" r.parentSheetSize.width, numberField m "Sheet height (in)" "sheet-height" r.parentSheetSize.height ]
-
-                      else
-                        text ""
-                    , label [ class "field" ]
-                        [ span [] [ text "Printing" ]
-                        , select
-                            [ attribute "aria-label" "Printing"
-                            , value
-                                (if r.sides == A.SidesDouble then
-                                    "double"
-
-                                 else
-                                    "single"
-                                )
-                            , onInput (Field "sides")
-                            ]
-                            [ option [ value "single" ] [ text "Single-sided" ], option [ value "double", disabled (modBy 2 (Maybe.withDefault 1 r.sourcePageCount) /= 0) ] [ text "Double-sided" ] ]
-                        ]
-                    ]
-
-                2 ->
-                    [ h3 [] [ text "Arrangement" ]
+                    , div [ class "field-grid two" ] [ numberField m "Width (in)" "finished-width" r.finishedCutSize.width, numberField m "Height (in)" "finished-height" r.finishedCutSize.height ]
+                    , dropdownView (orientationDropdown m)
+                    , h3 [] [ text "Arrangement" ]
                     , choices "Sheet arrangements"
                         "layout"
                         (if r.layoutMode == A.LayoutModeManual then
@@ -708,21 +775,90 @@ setupView m =
 
                       else
                         text ""
+                    , if not m.chosenWidth || not m.chosenHeight then
+                        p [ class "field-help" ] [ text "Choose both finished dimensions or apply a preset." ]
+
+                      else
+                        text ""
+                    , section [ class "impose-artwork-files", attribute "aria-label" "Artwork files" ]
+                        [ div [ class "artwork-files-heading" ]
+                            [ h3 [] [ text "Artwork files" ]
+                            , p [ class "field-help" ]
+                                [ text
+                                    (String.fromInt (Maybe.withDefault 0 r.sourcePageCount)
+                                        ++ (if r.sourcePageCount == Just 1 then
+                                                " page of artwork"
+
+                                            else
+                                                " pages of artwork"
+                                           )
+                                    )
+                                ]
+                            ]
+                        , queueView m
+                        ]
+                    ]
+
+                1 ->
+                    [ h3 [] [ text "Quantity and sheet" ]
+                    , choices "How should these pages print?"
+                        "mode"
+                        (if r.impositionMode == A.ImpositionModeRepeat then
+                            "repeat"
+
+                         else
+                            "unique"
+                        )
+                        [ ( "unique", "Use each page once" ), ( "repeat", "Repeat pages" ) ]
+                    , if r.impositionMode == A.ImpositionModeRepeat then
+                        if List.length (I.quantities r) == 1 then
+                            numberField m "Copies" "copies" (toFloat r.quantityRequested)
+
+                        else
+                            div [ class "repeat-quantity-section", attribute "aria-label" "Copy quantities" ]
+                                [ span [ class "quantity-summary-label" ] [ text "Copy quantities" ]
+                                , strong [ class "quantity-summary-total" ] [ text (String.fromInt r.quantityRequested ++ " impressions") ]
+                                , p [ class "quantity-summary-detail" ]
+                                    [ text
+                                        (I.quantities r
+                                            |> List.take 4
+                                            |> List.indexedMap
+                                                (\i n ->
+                                                    (if r.sides == A.SidesDouble then
+                                                        "Pages " ++ String.fromInt (i * 2 + 1) ++ "–" ++ String.fromInt (i * 2 + 2)
+
+                                                     else
+                                                        "Page " ++ String.fromInt (i + 1)
+                                                    )
+                                                        ++ ": "
+                                                        ++ String.fromInt n
+                                                )
+                                            |> String.join " · "
+                                        )
+                                    , if List.length (I.quantities r) > 4 then
+                                        text (" · +" ++ String.fromInt (List.length (I.quantities r) - 4) ++ " more")
+
+                                      else
+                                        text ""
+                                    ]
+                                , Button.content [ id "edit-copy-quantities", attribute "aria-label" "Edit copy quantities", attribute "aria-haspopup" "dialog" ] { variant = Button.Quiet, disabled = False, busy = False, className = "quantity-summary-edit" } [ text "Edit" ] (OpenDialog "quantities")
+                                ]
+
+                      else
+                        text ""
+                    , dropdownView (sheetDropdown m)
+                    , if Dict.member "sheet-custom" m.drafts || sheetName r.parentSheetSize == "custom" then
+                        div [ class "field-grid two" ] [ numberField m "Sheet width (in)" "sheet-width" r.parentSheetSize.width, numberField m "Sheet height (in)" "sheet-height" r.parentSheetSize.height ]
+
+                      else
+                        text ""
+                    , dropdownView (printingDropdown m)
                     , details []
                         [ summary [] [ text "Advanced sheet settings" ]
-                        , selectField "Impression orientation" "orientation" (orientationName r.orientationPreference) [ ( "auto", "Auto" ), ( "upright", "Upright" ), ( "quarterTurn", "Quarter-turn" ), ( "portrait", "Portrait" ), ( "landscape", "Landscape" ) ]
                         , div [ class "field-grid two" ] [ numberField m "Horizontal gutter (in)" "gutter-horizontal" r.gutter.horizontal, numberField m "Vertical gutter (in)" "gutter-vertical" r.gutter.vertical ]
                         , if r.sides == A.SidesDouble then
                             div []
-                                [ selectField "Duplex flip edge"
-                                    "flip"
-                                    (if duplex.flipEdge == A.DuplexFlipEdgeLongEdge then
-                                        "longEdge"
-
-                                     else
-                                        "shortEdge"
-                                    )
-                                    [ ( "longEdge", "Long edge" ), ( "shortEdge", "Short edge" ) ]
+                                [ dropdownView (flipDropdown m)
                                 , check "Rotate back side 180°" "rotate-back" duplex.rotateBack180
                                 ]
 
@@ -730,8 +866,7 @@ setupView m =
                             text ""
                         , if r.layoutMode == A.LayoutModeManual then
                             div []
-                                [ selectField "Item rotation" "rotation" (String.fromInt manual.rotationDegrees) [ ( "0", "0°" ), ( "90", "90°" ) ]
-                                , check "Center grid automatically" "center" (manual.margins == Nothing)
+                                [ check "Center grid automatically" "center" (manual.margins == Nothing)
                                 , case manual.margins of
                                     Nothing ->
                                         text ""
@@ -747,24 +882,57 @@ setupView m =
 
                 _ ->
                     [ h3 [] [ text "Edge artwork" ]
-                    , p [ class "bleed-status" ]
-                        [ text
-                            (if r.sourceBleedOverride /= Nothing then
-                                "Manual PDF bleed"
+                    , details
+                        (class "bleed-source-setting"
+                            :: (if r.sourceBleedOverride /= Nothing then
+                                    [ attribute "open" "" ]
 
-                             else if Maybe.map (.likelyBleed >> .detected) source |> Maybe.withDefault False then
-                                "Detected PDF bleed"
+                                else
+                                    []
+                               )
+                        )
+                        [ summary [ class "bleed-status" ]
+                            [ if hasDetectedBleed && r.sourceBleedOverride == Nothing then
+                                span [ class "bleed-detected-check", attribute "aria-hidden" "true" ] [ text "✓" ]
 
-                             else
-                                "No uniform bleed detected"
-                            )
+                              else
+                                text ""
+                            , span [ class "bleed-status-copy" ]
+                                [ strong []
+                                    [ text
+                                        (if r.sourceBleedOverride /= Nothing then
+                                            "Manual PDF bleed"
+
+                                         else if hasDetectedBleed then
+                                            "PDF bleed detected"
+
+                                         else
+                                            "No uniform bleed detected"
+                                        )
+                                    ]
+                                , if hasDetectedBleed || r.sourceBleedOverride /= Nothing then
+                                    span [] [ text (String.fromFloat bleedAmount ++ " in per side") ]
+
+                                  else
+                                    text ""
+                                ]
+                            , span [ class "bleed-edit-label" ]
+                                [ text
+                                    (if hasDetectedBleed || r.sourceBleedOverride /= Nothing then
+                                        "Edit"
+
+                                     else
+                                        "Enter manually"
+                                    )
+                                ]
+                            ]
+                        , numberField m "PDF bleed per side (in)" "source-bleed" bleedAmount
+                        , if r.sourceBleedOverride /= Nothing then
+                            btn "Use auto-detected bleed" (Toggle "clear-bleed")
+
+                          else
+                            text ""
                         ]
-                    , case r.sourceBleedOverride of
-                        Nothing ->
-                            btn "Enter bleed manually" (Field "source-bleed" "0.125")
-
-                        Just amount ->
-                            div [] [ numberField m "PDF bleed per side (in)" "source-bleed" amount, btn "Clear manual amount" (Toggle "clear-bleed") ]
                     , choices "Artwork at the cut line"
                         "bleed"
                         (if r.bleedOption == A.BleedOptionScaleToBleed then
@@ -779,60 +947,63 @@ setupView m =
 
                       else
                         text ""
+                    , div [ class "production-notes" ] (Maybe.map (.warnings >> List.map (\w -> p [ class "field-help" ] [ text (w.problem ++ " " ++ w.impact ++ " " ++ w.fix) ])) m.layout |> Maybe.withDefault [])
                     ]
     in
-    section [ id "gang-setup-panel", class "gang-panel gang-setup elm-setup", attribute "aria-label" "Print setup" ]
-        [ nav [ class "setup-stepper", attribute "aria-label" "Print setup" ]
-            [ ol [ attribute "role" "tablist", attribute "aria-label" "Print setup options" ]
-                (List.indexedMap
-                    (\i t ->
-                        li [ attribute "role" "presentation" ]
-                            [ button
-                                [ type_ "button"
-                                , id ("setup-tab-" ++ String.fromInt i)
-                                , attribute "role" "tab"
-                                , attribute "aria-controls" "setup-tab-panel"
-                                , attribute "aria-selected"
-                                    (if i == m.step then
-                                        "true"
+    Keyed.node "section"
+        [ id "gang-setup-panel", class "gang-panel gang-setup elm-setup", attribute "aria-label" "Print setup" ]
+        [ ( "tabs"
+          , nav [ class "setup-stepper", attribute "aria-label" "Print setup" ]
+                [ ol [ attribute "role" "tablist", attribute "aria-label" "Print setup options" ]
+                    (List.indexedMap
+                        (\i t ->
+                            li [ attribute "role" "presentation" ]
+                                [ Button.content
+                                    [ id ("setup-tab-" ++ String.fromInt i)
+                                    , attribute "role" "tab"
+                                    , attribute "aria-controls" "setup-tab-panel"
+                                    , attribute "aria-selected"
+                                        (if i == m.step then
+                                            "true"
 
-                                     else
-                                        "false"
-                                    )
-                                , tabindex
-                                    (if i == m.step then
-                                        0
+                                         else
+                                            "false"
+                                        )
+                                    , tabindex
+                                        (if i == m.step then
+                                            0
 
-                                     else
-                                        -1
-                                    )
-                                , onClick (SetStep i)
-                                , preventDefaultOn "keydown" (setupTabKey i)
+                                         else
+                                            -1
+                                        )
+                                    , preventDefaultOn "keydown" (setupTabKey i)
+                                    ]
+                                    { variant = Button.Secondary, disabled = False, busy = False, className = "" }
+                                    [ span [ class "setup-step-label" ] [ text t ] ]
+                                    (SetStep i)
                                 ]
-                                [ span [ class "setup-step-label" ] [ text t ] ]
-                            ]
+                        )
+                        [ "Size", "Sheet", "Bleed" ]
                     )
-                    [ "Size", "Quantity & sheet", "Arrangement", "Bleed" ]
-                )
-            ]
-        , fieldset [ class "gang-setup-fields", disabled m.busy ] [ div [ id "setup-tab-panel", class "setup-step-panel", attribute "role" "tabpanel", attribute "aria-labelledby" ("setup-tab-" ++ String.fromInt m.step), tabindex 0 ] (h3 [ class "visually-hidden" ] [ text title ] :: controls) ]
-        , div [ class "setup-step-actions elm-setup-actions" ]
-            [ if m.step > 0 then
-                btn "Back" (SetStep (m.step - 1))
+                ]
+          )
+        , ( "fields-" ++ String.fromInt m.step
+          , fieldset [ class "gang-setup-fields", disabled m.busy ]
+                [ div [ id "setup-tab-panel", class "setup-step-panel", attribute "role" "tabpanel", attribute "aria-labelledby" ("setup-tab-" ++ String.fromInt m.step), tabindex 0 ]
+                    (h3 [ class "visually-hidden" ] [ text title ] :: controls)
+                ]
+          )
+        , ( "actions"
+          , div [ class "setup-step-actions elm-setup-actions" ]
+                [ Button.content [ attribute "aria-label" "Back", Html.Attributes.title "Previous setup step" ] { variant = Button.Secondary, disabled = m.step == 0 || m.busy, busy = False, className = "da-button--icon ghost-button setup-back-button" } [ setupArrow False ] (SetStep (m.step - 1))
+                , if m.step == 2 then
+                    Button.content [] { variant = Button.Primary, disabled = not (setupValid m) || m.busy || not m.layoutReady, busy = False, className = "primary-button setup-download-button" } [ text "Download imposed PDF" ] Submit
 
-              else
-                text ""
-            , if m.step < 3 then
-                primary "Continue" (SetStep (m.step + 1)) False
-
-              else
-                primary "Download imposed PDF" Submit (not (setupValid m) || m.busy || not m.layoutReady)
-            ]
-        , if m.step == 3 then
-            details [ class "elm-saved-footer" ] [ summary [] [ text "Saved work" ], savedView m ]
-
-          else
-            text ""
+                  else
+                    text ""
+                , Button.content [ attribute "aria-label" "Continue", Html.Attributes.title "Next setup step" ] { variant = Button.Primary, disabled = m.step == 2 || m.busy, busy = False, className = "da-button--icon primary-button setup-continue-button" } [ setupArrow True ] (SetStep (m.step + 1))
+                ]
+          )
         ]
 
 
@@ -854,101 +1025,44 @@ sheetName s =
         "custom"
 
 
-orientationName : A.OrientationPreference -> String
-orientationName o =
-    case o of
-        A.OrientationPreferenceUpright ->
-            "upright"
-
-        A.OrientationPreferenceQuarterTurn ->
-            "quarterTurn"
-
-        A.OrientationPreferencePortrait ->
-            "portrait"
-
-        A.OrientationPreferenceLandscape ->
-            "landscape"
-
-        _ ->
-            "auto"
-
-
-fitFor : Model -> A.ArtworkFit
-fitFor m =
-    let
-        own =
-            if m.perArtwork then
-                List.filter (\p -> p.pageNumber == m.selectedPage) m.request.pageOverrides |> List.head |> Maybe.andThen .artworkFit
-
-            else
-                Nothing
-    in
-    case own of
-        Just fit ->
-            fit
-
-        Nothing ->
-            Maybe.withDefault { mode = A.ArtworkFitModeContain, position = { x = 0.5, y = 0.5 } } m.request.artworkFit
-
-
 toolbarView : Model -> Html Msg
 toolbarView m =
     let
         fit =
-            fitFor m
+            Maybe.withDefault { mode = A.ArtworkFitModeContain, position = { x = 0.5, y = 0.5 } } m.request.artworkFit
 
-        size =
-            if m.perArtwork then
-                List.filter (\p -> p.pageNumber == m.selectedPage) m.request.pageOverrides |> List.head |> Maybe.andThen .finishedCutSize |> Maybe.withDefault m.request.finishedCutSize
+        base =
+            Popover.config "impose-presets" "Saved impose settings" "impose-presets-trigger" (SetPresetsOpen False)
 
-            else
-                m.request.finishedCutSize
+        presets =
+            { base | open = m.presetsOpen }
+
+        fitting =
+            DaField.config "fit" "Artwork fitting"
+
+        fittingDescription =
+            "Fit keeps proportions and shows all artwork. Fill keeps proportions and crops to fill the finished size. Stretch scales width and height independently; this can distort artwork."
     in
     section [ class "impose-workspace-toolbar elm-toolbar", attribute "aria-label" "Artwork and sheet preview controls" ]
-        [ btn
-            (if m.collapsed then
-                "Show setup toolbar"
+        [ div [ class "artwork-fitting", Html.Attributes.title fittingDescription ]
+            [ DaField.segmented []
+                { fitting | disabled = m.busy, description = Just fittingDescription }
+                { value =
+                    case fit.mode of
+                        A.ArtworkFitModeContain ->
+                            "contain"
 
-             else
-                "Hide setup toolbar"
-            )
-            (Toggle "collapse")
-        , details [ class "elm-artwork-menu artwork-toolbar-disclosure" ]
-            [ summary [ class "ghost-button" ] [ text "Artwork" ]
-            , fieldset [ disabled m.busy ]
-                [ choices "Artwork fitting"
-                    "fit"
-                    (case fit.mode of
                         A.ArtworkFitModeCover ->
                             "cover"
 
                         A.ArtworkFitModeStretch ->
                             "stretch"
-
-                        _ ->
-                            "contain"
-                    )
-                    [ ( "contain", "Fit" ), ( "cover", "Fill" ), ( "stretch", "Stretch" ) ]
-                , selectField "Impression orientation" "orientation" (orientationName m.request.orientationPreference) [ ( "auto", "Auto · best sheet fit" ), ( "upright", "Upright · 0°" ), ( "quarterTurn", "Quarter-turn · 90°" ) ]
-                , selectField "Selected artwork" "page" (String.fromInt m.selectedPage) (List.range 1 (Maybe.withDefault 1 m.request.sourcePageCount) |> List.map (\i -> ( String.fromInt i, "Page " ++ String.fromInt i )))
-                , check "Adjust only selected artwork" "per-artwork" m.perArtwork
-                , if m.perArtwork then
-                    div [] [ div [ class "field-grid two" ] [ numberField m "Artwork finished width (in)" "artwork-width" size.width, numberField m "Artwork finished height (in)" "artwork-height" size.height ], btn "Use shared settings for this artwork" (Toggle "clear-override") ]
-
-                  else
-                    text ""
-                , if fit.mode == A.ArtworkFitModeCover then
-                    div [] [ p [] [ text "Crop position" ], div [ class "field-grid two" ] [ numberField m "Horizontal position" "crop-x" fit.position.x, numberField m "Vertical position" "crop-y" fit.position.y ], label [ class "field" ] [ span [] [ text "Horizontal crop" ], input [ type_ "range", Html.Attributes.min "0", Html.Attributes.max "1", Html.Attributes.step "0.01", value (String.fromFloat fit.position.x), onInput (Field "crop-x") ] [] ], label [ class "field" ] [ span [] [ text "Vertical crop" ], input [ type_ "range", Html.Attributes.min "0", Html.Attributes.max "1", Html.Attributes.step "0.01", value (String.fromFloat fit.position.y), onInput (Field "crop-y") ] [] ], div [ class "crop-anchor-grid", attribute "role" "group", attribute "aria-label" "Crop position anchors" ] (List.map (\( x, y, title ) -> button [ type_ "button", attribute "aria-label" title, Html.Attributes.title title, onClick (CropAnchor x y) ] [ span [ attribute "aria-hidden" "true" ] [] ]) [ ( 0, 0, "Top left" ), ( 0.5, 0, "Top center" ), ( 1, 0, "Top right" ), ( 0, 0.5, "Middle left" ), ( 0.5, 0.5, "Center" ), ( 1, 0.5, "Middle right" ), ( 0, 1, "Bottom left" ), ( 0.5, 1, "Bottom center" ), ( 1, 1, "Bottom right" ) ]), btn "Reset crop position" (Toggle "crop-reset"), Preview.crop m fit ]
-
-                  else
-                    text ""
-                ]
+                , onSelect = Field "fit"
+                , options = fieldOptions [ ( "contain", "Fit" ), ( "cover", "Fill" ), ( "stretch", "Stretch" ) ]
+                }
             ]
-        , div [ class "sheet-preview-nav" ]
-            [ button [ type_ "button", class "ghost-button sheet-nav-button previous", attribute "aria-label" "Previous sheet", disabled (m.sheet == 0), onClick (Navigate (Basics.max 0 (m.sheet - 1)) m.back) ] [ span [ class "sheet-nav-label" ] [ text "Previous sheet" ] ]
-            , span [] [ text ("Sheet " ++ String.fromInt (m.sheet + 1) ++ " of " ++ String.fromInt (Maybe.map .sheetsRequired m.layout |> Maybe.withDefault 1)) ]
-            , button [ type_ "button", class "ghost-button sheet-nav-button next", attribute "aria-label" "Next sheet", disabled (m.sheet + 1 >= (Maybe.map .sheetsRequired m.layout |> Maybe.withDefault 1)), onClick (Navigate (m.sheet + 1) m.back) ] [ span [ class "sheet-nav-label" ] [ text "Next sheet" ] ]
-            , if m.request.sides == A.SidesDouble then
+        , div [ class "preview-side-controls", attribute "role" "group", attribute "aria-label" "Preview side" ]
+            [ if m.request.sides == A.SidesDouble then
                 btn
                     (if m.back then
                         "Show front"
@@ -961,15 +1075,25 @@ toolbarView m =
               else
                 text ""
             ]
-        , details [] [ summary [] [ text "Preview options" ], fieldset [] [ check "Cut lines" "cut" m.showCut, check "Bleed lines" "bleed-lines" m.showBleed, check "Gutters" "gutters" m.showGutters, check "Cut paths" "paths" m.showPaths, btn "Zoom out" (Toggle "zoom-out"), btn "Zoom in" (Toggle "zoom-in"), btn "Fit sheet" (Toggle "zoom-fit") ] ]
+        , div [ class "elm-preview-controls" ]
+            [ div [ class "sheet-preview-nav" ]
+                [ span [ class "sheet-nav-status", attribute "role" "status" ] [ text ("Sheet " ++ String.fromInt (m.sheet + 1) ++ " of " ++ String.fromInt (Maybe.map .sheetsRequired m.layout |> Maybe.withDefault 1)) ]
+                , Button.content [ attribute "aria-label" "Previous sheet" ] { variant = Button.Secondary, disabled = m.sheet == 0, busy = False, className = "ghost-button sheet-nav-button previous" } [ span [ class "sheet-nav-label" ] [ text "Previous sheet" ] ] (Navigate (Basics.max 0 (m.sheet - 1)) m.back)
+                , Button.content [ attribute "aria-label" "Next sheet" ] { variant = Button.Secondary, disabled = m.sheet + 1 >= (Maybe.map .sheetsRequired m.layout |> Maybe.withDefault 1), busy = False, className = "ghost-button sheet-nav-button next" } [ span [ class "sheet-nav-label" ] [ text "Next sheet" ] ] (Navigate (m.sheet + 1) m.back)
+                ]
+            ]
+        , div [ class "elm-presets-menu" ]
+            [ Popover.trigger [] presets "Presets" (SetPresetsOpen (not m.presetsOpen))
+            , Popover.view [] presets [ savedView m ]
+            ]
         ]
 
 
 savedView : Model -> Html Msg
 savedView m =
     div [ class "elm-saved" ]
-        [ select [ attribute "aria-label" "Apply preset", onInput ApplyPreset ] (option [ value "" ] [ text "Choose a preset" ] :: List.map (\p -> option [ value p.id ] [ text p.name ]) m.presets)
-        , label [ class "field" ] [ span [] [ text "Setup name" ], input [ value m.savedName, onInput (Field "name") ] [] ]
+        [ dropdownView (presetDropdown m)
+        , textField "setup-name" "Setup name" m.savedName (Field "name")
         , div [ class "elm-button-row" ]
             [ btn
                 (if m.editingPreset == Nothing then
@@ -980,7 +1104,7 @@ savedView m =
                 )
                 (Save "presets")
             , btn "Save as new preset" (Save "new-preset")
-            , button [ type_ "button", class "ghost-button", disabled (m.editingPreset == Nothing), onClick (Save "rename-preset") ] [ text "Rename" ]
+            , Button.content [] { variant = Button.Secondary, disabled = m.editingPreset == Nothing, busy = False, className = "ghost-button" } [ text "Rename" ] (Save "rename-preset")
             , btn "Save recent job" (Save "recent-jobs")
             ]
         , details []
@@ -1002,25 +1126,6 @@ savedView m =
                 )
             ]
         , details [] [ summary [] [ text "Recent jobs" ], ul [] (List.map (\p -> li [] [ text p.name, btn "Restore setup" (ApplySaved "recent-jobs" p.id), btn "Delete" (DeleteSaved "recent-jobs" p.id) ]) m.recent) ]
-        , details []
-            [ summary [] [ text "Export history" ]
-            , ul []
-                (List.map
-                    (\p ->
-                        li []
-                            [ text p.name
-                            , btn "Restore setup" (ApplySaved "export-history" p.id)
-                            , if p.hasStoredFile then
-                                a [ class "ghost-button", href ("gang-up/export-history/" ++ p.id), download p.outputFilename ] [ text "Download" ]
-
-                              else
-                                text ""
-                            , btn "Delete" (DeleteSaved "export-history" p.id)
-                            ]
-                    )
-                    m.history
-                )
-            ]
         ]
 
 
@@ -1048,7 +1153,7 @@ dialogView m =
             case m.dialog of
                 "range" ->
                     [ p [] [ text ("This source has " ++ String.fromInt count ++ " pages. Example: 1-3, 5, 8-10") ]
-                    , label [ class "field" ] [ span [] [ text "Pages" ], input [ id "range-input", autofocus True, value m.rangeDraft, onInput (Field "range") ] [] ]
+                    , textField "range-input" "Pages" m.rangeDraft (Field "range")
                     , if issue /= "" then
                         small [ class "field-error", attribute "role" "alert" ] [ text issue ]
 
@@ -1067,7 +1172,21 @@ dialogView m =
                                 "Set a default for every page, then adjust exceptions below."
                             )
                         ]
-                    , label [ class "field" ] [ span [] [ text "Copies for all" ], input [ id "bulk-copy-quantity", value m.bulkDraft, attribute "inputmode" "numeric", onInput (Field "bulk") ] [] ]
+                    , DaField.input
+                        [ preventDefaultOn "keydown"
+                            (D.field "key" D.string
+                                |> D.andThen
+                                    (\key ->
+                                        if key == "Enter" then
+                                            D.succeed ( ApplyDialog, True )
+
+                                        else
+                                            D.fail "Not Enter"
+                                    )
+                            )
+                        ]
+                        (DaField.config "bulk-copy-quantity" "Copies for all")
+                        { value = m.bulkDraft, onInput = Field "bulk", kind = DaField.Integer }
                     , if Result.toMaybe (V.whole 0 10000 m.bulkDraft) == Nothing then
                         small [ class "field-error", attribute "role" "alert" ] [ text "Enter a whole number from 0 to 10000." ]
 
@@ -1078,36 +1197,29 @@ dialogView m =
                         (I.quantities m.request
                             |> List.indexedMap
                                 (\i n ->
-                                    label [ class "quantity-dialog-row" ]
-                                        [ span []
-                                            [ text
+                                    let
+                                        draft =
+                                            Dict.get i m.quantityDrafts |> Maybe.withDefault (String.fromInt n)
+
+                                        config =
+                                            DaField.config ("page-copies-" ++ String.fromInt i)
                                                 (if m.request.sides == A.SidesDouble then
-                                                    "Pages " ++ String.fromInt (i * 2 + 1) ++ "–" ++ String.fromInt (i * 2 + 2)
+                                                    "Pages " ++ String.fromInt (i * 2 + 1) ++ "–" ++ String.fromInt (i * 2 + 2) ++ " copies"
 
                                                  else
-                                                    "Page " ++ String.fromInt (i + 1)
+                                                    "Page " ++ String.fromInt (i + 1) ++ " copies"
                                                 )
-                                            ]
-                                        , input
-                                            [ attribute "aria-label" ("Page " ++ String.fromInt (i + 1) ++ " copies")
-                                            , attribute "aria-invalid"
-                                                (if Result.toMaybe (V.whole 0 10000 (Dict.get i m.quantityDrafts |> Maybe.withDefault (String.fromInt n))) == Nothing then
-                                                    "true"
+                                    in
+                                    DaField.input []
+                                        { config
+                                            | error =
+                                                if Result.toMaybe (V.whole 0 10000 draft) == Nothing then
+                                                    Just "Enter a whole number from 0 to 10000."
 
-                                                 else
-                                                    "false"
-                                                )
-                                            , value (Dict.get i m.quantityDrafts |> Maybe.withDefault (String.fromInt n))
-                                            , attribute "inputmode" "numeric"
-                                            , onInput (Quantity i)
-                                            ]
-                                            []
-                                        , if Result.toMaybe (V.whole 0 10000 (Dict.get i m.quantityDrafts |> Maybe.withDefault (String.fromInt n))) == Nothing then
-                                            small [ class "field-error" ] [ text "Enter a whole number from 0 to 10000." ]
-
-                                          else
-                                            text ""
-                                        ]
+                                                else
+                                                    Nothing
+                                        }
+                                        { value = draft, onInput = Quantity i, kind = DaField.Integer }
                                 )
                         )
                     , primary "Done" CloseDialog (not (Dict.isEmpty (Dict.filter (\_ v -> Result.toMaybe (V.whole 0 10000 v) == Nothing) m.quantityDrafts)))
@@ -1116,20 +1228,34 @@ dialogView m =
                 _ ->
                     [ p [] [ text "This removes every selected file and resets all tool settings." ], primary "Clear files" ApplyDialog False ]
     in
-    node "dialog"
-        [ id "workspace-dialog", class "quantity-dialog range-dialog", attribute "aria-labelledby" "dialog-title", preventDefaultOn "cancel" (D.succeed ( CloseDialog, True )) ]
-        [ Html.form [ onSubmit ApplyDialog ]
-            [ header [ class "quantity-dialog-head" ] [ h2 [ id "dialog-title" ] [ text title ], button [ type_ "button", class "quantity-dialog-close", attribute "aria-label" "Close dialog", onClick CloseDialog ] [ text "×" ] ]
-            , div [ class "elm-dialog-content" ] content
-            , footer [ class "quantity-dialog-actions" ]
-                [ btn
-                    (if m.dialog == "clear" then
-                        "Keep working"
+    let
+        config =
+            Dialog.config "workspace-dialog" title CloseDialog
+    in
+    Dialog.view []
+        { config
+            | open = True
+            , initialFocus =
+                Just
+                    (if m.dialog == "range" then
+                        "range-input"
+
+                     else if m.dialog == "quantities" then
+                        "bulk-copy-quantity"
 
                      else
-                        "Cancel"
+                        "button"
                     )
-                    CloseDialog
-                ]
+        }
+        { body = [ Html.form [ class "elm-dialog-content", onSubmit ApplyDialog ] content ]
+        , actions =
+            [ btn
+                (if m.dialog == "clear" then
+                    "Keep working"
+
+                 else
+                    "Cancel"
+                )
+                CloseDialog
             ]
-        ]
+        }

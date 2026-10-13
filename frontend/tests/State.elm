@@ -1,8 +1,10 @@
 module State exposing (tests)
 
 import Api.Generated as A
+import Da.Dropdown as Dropdown
 import Dict
 import Expect
+import Http
 import Imposition as I
 import Job
 import Json.Decode as D
@@ -11,7 +13,11 @@ import Main
 import Model exposing (..)
 import RustWire
 import Test exposing (..)
+import Test.Html.Event as Event
+import Test.Html.Query as Query
+import Test.Html.Selector as Selector
 import Validation as V
+import View
 
 
 initial : Model
@@ -37,7 +43,279 @@ source =
 tests : Test
 tests =
     describe "Validation and workspace transitions"
-        [ test "Finished size requires source preparation or entered dimensions"
+        [ test "Theme toggle preserves working inputs"
+            (\_ ->
+                let
+                    before =
+                        initial |> step (Field "finished-width" "3.5")
+
+                    after =
+                        step (Toggle "theme") before
+                in
+                Expect.equal ( ( False, "dark" ), before.request, before.drafts ) ( ( after.workspaceMenu, after.theme ), after.request, after.drafts )
+            )
+        , test "Workspace clear action opens confirmation before clearing settings"
+            (\_ ->
+                let
+                    before =
+                        initial |> step (Field "finished-width" "3.5") |> step (SetWorkspaceMenu True)
+
+                    after =
+                        step (WorkspaceAction "clear") before
+                in
+                Expect.equal ( ( False, "clear" ), before.request, before.drafts ) ( ( after.workspaceMenu, after.dialog ), after.request, after.drafts )
+            )
+        , test "Workspace clear cannot interrupt pending work"
+            (\_ ->
+                let
+                    before =
+                        { initial | busy = True, workspaceMenu = True }
+
+                    after =
+                        step (WorkspaceAction "clear") before
+                in
+                Expect.equal ( False, "", True ) ( after.workspaceMenu, after.dialog, after.busy )
+            )
+        , test "Dropdown navigation preserves geometry and pending layout until a value is committed"
+            (\_ ->
+                let
+                    before =
+                        initial |> step (Field "finished-width" "3.5") |> step (Field "finished-height" "2")
+
+                    after =
+                        step (DropdownChanged "finished-orientation" "landscape" { state = Dropdown.initial, value = "landscape" }) before
+                in
+                Expect.equal ( before.request, before.revision, before.drafts ) ( after.request, after.revision, after.drafts )
+            )
+        , test "Committing the orientation dropdown swaps the explicitly chosen dimensions"
+            (\_ ->
+                let
+                    before =
+                        initial |> step (Field "finished-width" "3.5") |> step (Field "finished-height" "2")
+
+                    after =
+                        step (DropdownChanged "finished-orientation" "landscape" { state = Dropdown.initial, value = "portrait" }) before
+                in
+                Expect.equal ( { width = 2, height = 3.5 }, True, True )
+                    ( after.request.finishedCutSize, after.chosenWidth, after.chosenHeight )
+            )
+        , test "Changing sheet size through the dropdown retains finished sizing and fitting"
+            (\_ ->
+                let
+                    before =
+                        initial |> step (Field "finished-width" "5") |> step (Field "finished-height" "7") |> step (Field "fit" "cover")
+
+                    after =
+                        step (DropdownChanged "sheet" "12x18" { state = Dropdown.initial, value = "11x17" }) before
+                in
+                Expect.equal ( { width = 11, height = 17 }, before.request.finishedCutSize, before.request.artworkFit )
+                    ( after.request.parentSheetSize, after.request.finishedCutSize, after.request.artworkFit )
+            )
+        , test "Closing presets clears transient dropdown state and retains layout settings"
+            (\_ ->
+                let
+                    before =
+                        initial |> step (Field "finished-width" "5") |> step (SetPresetsOpen True) |> step (DropdownChanged "apply-preset" "" { state = Dropdown.initial, value = "" })
+
+                    after =
+                        step (SetPresetsOpen False) before
+                in
+                Expect.equal ( ( False, True ), before.request, before.drafts )
+                    ( ( after.presetsOpen, Dict.isEmpty after.dropdowns ), after.request, after.drafts )
+            )
+        , test "Setup navigation clears transient dropdown state and preserves inputs"
+            (\_ ->
+                let
+                    before =
+                        initial |> step (Field "finished-width" "3.5") |> step (DropdownChanged "finished-orientation" "landscape" { state = Dropdown.initial, value = "landscape" })
+
+                    after =
+                        step (SetStep 1) before
+                in
+                Expect.equal ( True, before.drafts, 1 ) ( Dict.isEmpty after.dropdowns, after.drafts, after.step )
+            )
+        , test "The three setup steps retain custom grid settings and invalid drafts"
+            (\_ ->
+                let
+                    sheet =
+                        initial
+                            |> step (SetStep 1)
+                            |> step (Field "layout" "manual")
+                            |> step (Field "rows" "2")
+                            |> step (Field "columns" "-")
+
+                    back =
+                        sheet |> step (SetStep 2) |> step (SetStep 0) |> step (SetStep 1)
+                in
+                Expect.equal ( sheet.request, sheet.drafts, 1 ) ( back.request, back.drafts, back.step )
+            )
+        , test "Bleed is the final setup step and navigation rejects removed steps"
+            (\_ ->
+                let
+                    bleed =
+                        step (SetStep 2) initial
+                in
+                Expect.all
+                    [ \_ -> Expect.equal 2 bleed.step
+                    , \_ -> Expect.equal bleed (step (SetStep 3) bleed)
+                    , \_ -> Expect.equal bleed (step (SetStep -1) bleed)
+                    ]
+                    ()
+            )
+        , test "Shared storage failure keeps the chosen theme and reports that it was not saved"
+            (\_ ->
+                let
+                    changed =
+                        step (Toggle "theme") initial
+
+                    failed =
+                        step
+                            (SharedBrowserResponse
+                                (E.object
+                                    [ ( "version", E.int 1 )
+                                    , ( "id", E.string "theme" )
+                                    , ( "kind", E.string "error" )
+                                    , ( "message", E.string "Storage unavailable" )
+                                    ]
+                                )
+                            )
+                            changed
+                in
+                Expect.equal ( "dark", False, "" ) ( failed.theme, String.isEmpty failed.notice, failed.error )
+            )
+        , test "Malformed shared browser responses preserve application state"
+            (\_ ->
+                Expect.equal initial (step (SharedBrowserResponse E.null) initial)
+            )
+        , test "Dismissing an error toast retains the failed request and retry state"
+            (\_ ->
+                let
+                    failed =
+                        step (Catalog "presets" (Err Http.NetworkError)) initial
+
+                    dismissed =
+                        step (DismissToast 1) failed
+                in
+                Expect.equal ( Nothing, failed.error, "catalog:presets" ) ( dismissed.toast, dismissed.error, dismissed.retryKind )
+            )
+        , test "An old toast timer cannot dismiss a newer notification"
+            (\_ ->
+                let
+                    confirmed =
+                        step (Saved "recent-jobs" (Ok E.null)) initial
+
+                    failed =
+                        step (Catalog "presets" (Err Http.NetworkError)) confirmed
+                in
+                Expect.equal failed.toast (step (DismissToast 1) failed).toast
+            )
+        , test "Confirmation expiry removes its toast"
+            (\_ ->
+                step (Saved "recent-jobs" (Ok E.null)) initial
+                    |> step (DismissToast 1)
+                    |> .toast
+                    |> Expect.equal Nothing
+            )
+        , test "Clearing the workspace preserves toast timer identity"
+            (\_ ->
+                let
+                    confirmed =
+                        step (Saved "recent-jobs" (Ok E.null)) initial
+
+                    next =
+                        confirmed |> step Clear |> step (Catalog "presets" (Err Http.NetworkError))
+                in
+                Expect.equal next.toast (step (DismissToast 1) next).toast
+            )
+        , test "Resolving a failed catalog request removes its error toast"
+            (\_ ->
+                initial
+                    |> step (Catalog "presets" (Err Http.NetworkError))
+                    |> step Retry
+                    |> .toast
+                    |> Expect.equal Nothing
+            )
+        , test "A valid preset can be saved at any step while the layout is pending"
+            (\_ ->
+                List.range 0 2
+                    |> List.map
+                        (\index ->
+                            step (Save "presets") { initial | step = index, chosenWidth = True, chosenHeight = True, savedName = "21 business cards", layoutReady = False }
+                                |> (\m -> ( m.error, m.retryKind ))
+                        )
+                    |> Expect.equal (List.repeat 3 ( "", "save:presets" ))
+            )
+        , test "Saving a preset rejects invalid settings and an empty name"
+            (\_ ->
+                [ { initial | chosenWidth = True, chosenHeight = True, savedName = "" }
+                , { initial | chosenWidth = True, chosenHeight = True, savedName = "Invalid grid", drafts = Dict.singleton "invalid:rows" "bad" }
+                ]
+                    |> List.map (step (Save "presets") >> .error >> String.isEmpty)
+                    |> Expect.equal [ False, False ]
+            )
+        , test "Rotating a page preserves shared size, quantities and other artwork overrides"
+            (\_ ->
+                let
+                    r =
+                        initial.request
+
+                    before =
+                        { initial | operation = Impose, request = { r | sourcePageCount = Just 2, pageOverrides = [ { pageNumber = 2, rotationDegrees = 0, finishedCutSize = Just { width = 3, height = 2 }, artworkFit = Nothing } ] } }
+
+                    after =
+                        step (RotateArtwork 2 90) before
+
+                    restored =
+                        step (RotateArtwork 2 0) after
+                in
+                Expect.all
+                    [ \_ -> Expect.equal 0 (I.artworkRotation 1 after.request)
+                    , \_ -> Expect.equal 90 (I.artworkRotation 2 after.request)
+                    , \_ -> Expect.equal before.request restored.request
+                    , \_ -> Expect.equal before.request.finishedCutSize after.request.finishedCutSize
+                    , \_ -> Expect.equal before.request.quantityRequested after.request.quantityRequested
+                    , \_ -> Expect.equal before (step (RotateArtwork 2 45) before)
+                    , \_ -> Expect.equal before (step (RotateArtwork 3 90) before)
+                    , \_ -> Expect.equal False after.layoutReady
+                    ]
+                    ()
+            )
+        , test "Artwork rotation applies to all 200 pages by default and retains piece settings"
+            (\_ ->
+                let
+                    r =
+                        initial.request
+
+                    own =
+                        { pageNumber = 2, rotationDegrees = 180, finishedCutSize = Just { width = 3, height = 2 }, artworkFit = Just { mode = A.ArtworkFitModeCover, position = { x = 0.2, y = 0.7 } } }
+
+                    before =
+                        { initial | operation = Impose, request = { r | sourcePageCount = Just 200, pageOverrides = [ own ] } }
+
+                    after =
+                        step (Field "artwork-rotation" "90") before
+
+                    individual =
+                        after |> step (Toggle "per-artwork") |> step (Field "page" "2") |> step (Field "artwork-rotation" "270")
+
+                    reset =
+                        individual |> step (Toggle "per-artwork") |> step (Field "artwork-rotation" "0")
+                in
+                Expect.all
+                    [ \_ -> Expect.equal (List.repeat 200 90) (List.map .rotationDegrees after.request.pageOverrides)
+                    , \_ -> Expect.equal (Just { own | rotationDegrees = 90 }) (List.filter (\p -> p.pageNumber == 2) after.request.pageOverrides |> List.head)
+                    , \_ -> Expect.equal [ 90, 270, 90 ] (List.map (\page -> I.artworkRotation page individual.request) [ 1, 2, 200 ])
+                    , \_ -> Expect.equal (List.repeat 200 0) (List.map .rotationDegrees reset.request.pageOverrides)
+                    , \_ -> Expect.equal before.request.finishedCutSize after.request.finishedCutSize
+                    , \_ -> Expect.equal before.request.quantityRequested after.request.quantityRequested
+                    , \_ -> Expect.equal before.request.orientationPreference after.request.orientationPreference
+                    , \_ -> Expect.equal False after.layoutReady
+                    , \_ -> Expect.equal before (step (Field "artwork-rotation" "45") before)
+                    , \_ -> Expect.equal { before | busy = True } (step (RotateAllArtwork 90) { before | busy = True })
+                    ]
+                    ()
+            )
+        , test "Finished size requires source preparation or entered dimensions"
             (\_ ->
                 let
                     width =
@@ -220,6 +498,72 @@ tests =
             (\_ ->
                 Expect.equal ( Nothing, Nothing, Nothing ) ( Result.toMaybe (V.number 0.01 100 "4."), Result.toMaybe (V.whole 0 10000 "-1"), Result.toMaybe (V.whole 0 10000 "2.5") )
             )
+        , test "Enter in Copies for all applies the bulk quantity and prevents native submission"
+            (\_ ->
+                View.view { initial | dialog = "quantities" }
+                    |> Query.fromHtml
+                    |> Query.find [ Selector.id "bulk-copy-quantity" ]
+                    |> Event.simulate (Event.custom "keydown" (E.object [ ( "key", E.string "Enter" ) ]))
+                    |> (\event -> Expect.all [ Event.expect ApplyDialog, Event.expectPreventDefault ] event)
+            )
+        , test "Bulk copies replace stale individual drafts for simplex and duplex, including zero"
+            (\_ ->
+                let
+                    apply sides count =
+                        let
+                            request =
+                                initial.request
+
+                            before =
+                                { initial
+                                    | dialog = "quantities"
+                                    , bulkDraft = String.fromInt count
+                                    , quantityDrafts = Dict.fromList [ ( 0, "8" ), ( 1, "-" ) ]
+                                    , request = { request | sourcePageCount = Just 6, impositionMode = A.ImpositionModeRepeat, sides = sides }
+                                }
+
+                            after =
+                                step ApplyDialog before
+                        in
+                        Expect.equal
+                            ( Just
+                                (List.repeat
+                                    (if sides == A.SidesDouble then
+                                        3
+
+                                     else
+                                        6
+                                    )
+                                    count
+                                )
+                            , ""
+                            , Dict.empty
+                            )
+                            ( after.request.impressionQuantities, after.dialog, after.quantityDrafts )
+                in
+                Expect.all
+                    [ \_ -> apply A.SidesSingle 3
+                    , \_ -> apply A.SidesDouble 3
+                    , \_ -> apply A.SidesSingle 0
+                    , \_ -> apply A.SidesDouble 0
+                    ]
+                    ()
+            )
+        , test "Invalid bulk copies retain the dialog and current page quantities"
+            (\_ ->
+                let
+                    check draft =
+                        let
+                            before =
+                                { initial | dialog = "quantities", bulkDraft = draft }
+
+                            after =
+                                step ApplyDialog before
+                        in
+                        Expect.equal ( before.request, "quantities" ) ( after.request, after.dialog )
+                in
+                Expect.all (List.map (\draft -> \_ -> check draft) [ "", "-1", "1.5", "10001" ]) ()
+            )
         , test "Preset application retains artwork identity, overrides and quantities"
             (\_ ->
                 let
@@ -227,7 +571,7 @@ tests =
                         I.initial
 
                     request =
-                        { r | sourceId = Just "source-7", sourcePageCount = Just 3, impositionMode = A.ImpositionModeRepeat, impressionQuantities = Just [ 2, 0, 3 ], quantityRequested = 5, pageOverrides = [ { pageNumber = 2, finishedCutSize = Just { width = 2, height = 1 }, artworkFit = Nothing } ] }
+                        { r | sourceId = Just "source-7", sourcePageCount = Just 3, impositionMode = A.ImpositionModeRepeat, impressionQuantities = Just [ 2, 0, 3 ], quantityRequested = 5, pageOverrides = [ { pageNumber = 2, rotationDegrees = 0, finishedCutSize = Just { width = 2, height = 1 }, artworkFit = Nothing } ] }
 
                     p =
                         { id = "preset", name = "Test", impositionMode = A.ImpositionModeUnique, finishedSizeMode = A.FinishedSizeModeCommon, artworkFit = r.artworkFit, sourceBleedOverride = Nothing, finishedCutSize = { width = 4.25, height = 6.25 }, parentSheetSize = r.parentSheetSize, bleedHandling = r.bleedOption, createdBleedAmount = r.createdBleedAmount, gutter = r.gutter, orientationPreference = r.orientationPreference, sides = r.sides, layoutPreference = r.layoutMode, manual = r.manual, duplex = r.duplex, outputPreference = A.OutputPreferenceCleanPdf, builtIn = False }
@@ -236,6 +580,44 @@ tests =
                         I.applyPreset p request
                 in
                 Expect.equal ( request.sourceId, request.impressionQuantities, request.pageOverrides ) ( next.sourceId, next.impressionQuantities, next.pageOverrides )
+            )
+        , test "Selecting repeat opens quantities in Sheet without advancing and reopening retains copies"
+            (\_ ->
+                let
+                    r =
+                        I.initial
+
+                    before =
+                        { initial | step = 1, request = { r | sourcePageCount = Just 2 } }
+
+                    opened =
+                        step (Field "mode" "repeat") before
+
+                    edited =
+                        opened |> step (Quantity 0 "7") |> step CloseDialog
+
+                    reopened =
+                        edited |> step (Field "mode" "unique") |> step (Field "mode" "repeat")
+                in
+                Expect.equal ( ( 1, "quantities", Just [ 1, 1 ] ), ( 1, "quantities", Just [ 7, 1 ] ) )
+                    ( ( opened.step, opened.dialog, opened.request.impressionQuantities ), ( reopened.step, reopened.dialog, reopened.request.impressionQuantities ) )
+            )
+        , test "Repeat opens quantities for a single page and for duplex pairs"
+            (\_ ->
+                let
+                    r =
+                        I.initial
+
+                    single =
+                        step (Field "mode" "repeat") { initial | request = { r | sourcePageCount = Just 1 } }
+
+                    duplex =
+                        { initial | request = { r | sourcePageCount = Just 4 } }
+                            |> step (Field "sides" "double")
+                            |> step (Field "mode" "repeat")
+                in
+                Expect.equal ( ( "quantities", [ 1 ] ), ( "quantities", [ 1, 1 ] ) )
+                    ( ( single.dialog, I.quantities single.request ), ( duplex.dialog, I.quantities duplex.request ) )
             )
         , test "Simplex and duplex quantity drafts survive mode changes"
             (\_ ->
@@ -320,7 +702,7 @@ tests =
                 in
                 Expect.equal ( True, "" ) ( late.busy, late.error )
             )
-        , test "A duplex preset restores printing choices while retaining simplex quantities"
+        , test "A duplex preset selected from the dropdown retains simplex quantities and printing choices"
             (\_ ->
                 case RustWire.cases |> List.filter (\( name, _ ) -> name == "GangUpPreset") |> List.head |> Maybe.andThen (Tuple.second >> D.decodeString A.gangUpPresetDecoder >> Result.toMaybe) of
                     Nothing ->
@@ -335,12 +717,13 @@ tests =
                                 { initial | presets = [ p ], request = { r | sourceId = Just "retained-source", sourcePageCount = Just 4, impositionMode = A.ImpositionModeRepeat, impressionQuantities = Just [ 2, 0, 4, 1 ], quantityRequested = 7 } }
 
                             applied =
-                                step (ApplyPreset p.id) working
+                                step (DropdownChanged "apply-preset" "" { state = Dropdown.initial, value = p.id }) working
 
                             restored =
                                 step (Field "sides" "single") applied
                         in
-                        Expect.equal ( A.SidesDouble, Just "retained-source", Just [ 2, 0, 4, 1 ] ) ( applied.request.sides, applied.request.sourceId, restored.request.impressionQuantities )
+                        Expect.equal ( ( A.SidesDouble, Just "retained-source", Just [ 2, 0, 4, 1 ] ), working.dialog )
+                            ( ( applied.request.sides, applied.request.sourceId, restored.request.impressionQuantities ), applied.dialog )
             )
         , test "Duplex preview pages use ordered pairs and stop at empty positions"
             (\_ ->

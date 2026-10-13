@@ -13,4 +13,6 @@ coverage
 
 frontend/node_modules
 frontend/elm-stuff
+frontend/browser/_build
+frontend/browser/elm-browser/.git
 test-results

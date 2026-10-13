@@ -2,7 +2,9 @@ port module Main exposing (init, main, update, validSetup)
 
 import Api.Generated as A
 import Browser
+import Da.Reorderable as Reorderable
 import Dict
+import ElmBrowser
 import File
 import File.Download
 import File.Select
@@ -25,6 +27,12 @@ port resources : E.Value -> Cmd msg
 port browserEvents : (D.Value -> msg) -> Sub msg
 
 
+port browserRequest : E.Value -> Cmd msg
+
+
+port browserResponse : (D.Value -> msg) -> Sub msg
+
+
 main : Program String Model Msg
 main =
     Browser.element { init = init, update = update, view = View.view, subscriptions = subscriptions }
@@ -42,6 +50,8 @@ init theme =
       , progress = 0
       , error = ""
       , notice = ""
+      , toast = Nothing
+      , nextToastId = 1
       , epoch = 0
       , job = Nothing
       , jobKind = ""
@@ -65,7 +75,6 @@ init theme =
       , back = False
       , step = 0
       , rail = "setup"
-      , collapsed = False
       , chosenWidth = False
       , chosenHeight = False
       , autoFinishedSize = True
@@ -74,12 +83,9 @@ init theme =
       , repeatSingle = []
       , repeatDouble = []
       , selectedPage = 1
+      , selectedImpression = Nothing
+      , artworkMenu = Nothing
       , perArtwork = False
-      , showCut = True
-      , showBleed = True
-      , showGutters = False
-      , showPaths = False
-      , zoom = 1
       , theme = theme
       , dialog = ""
       , rangeDraft = "1"
@@ -88,16 +94,18 @@ init theme =
       , editingPreset = Nothing
       , presets = []
       , recent = []
-      , history = []
-      , dragId = Nothing
+      , fileOrder = Reorderable.initial
+      , workspaceMenu = False
+      , presetsOpen = False
+      , dropdowns = Dict.empty
       }
-    , Cmd.batch (List.map catalog [ "presets", "recent-jobs", "export-history" ])
+    , Cmd.batch (List.map catalog [ "presets", "recent-jobs" ])
     )
 
 
 subscriptions : Model -> Sub Msg
-subscriptions _ =
-    Sub.batch [ browserEvents BrowserEvent, Time.every (10 * 60 * 1000) Lease, Http.track "job-upload" Uploaded ]
+subscriptions m =
+    Sub.batch [ browserEvents BrowserEvent, browserResponse SharedBrowserResponse, Time.every (10 * 60 * 1000) Lease, Http.track "job-upload" Uploaded, View.dropdownSubscriptions m ]
 
 
 bridge : String -> List ( String, E.Value ) -> Cmd Msg
@@ -490,7 +498,7 @@ updateOverride m change =
             m.request
 
         old =
-            List.filter (\p -> p.pageNumber == m.selectedPage) r.pageOverrides |> List.head |> Maybe.withDefault { pageNumber = m.selectedPage, finishedCutSize = Nothing, artworkFit = Nothing }
+            List.filter (\p -> p.pageNumber == m.selectedPage) r.pageOverrides |> List.head |> Maybe.withDefault { pageNumber = m.selectedPage, rotationDegrees = 0, finishedCutSize = Nothing, artworkFit = Nothing }
     in
     { r | pageOverrides = List.filter (\p -> p.pageNumber /= m.selectedPage) r.pageOverrides ++ [ change old ] }
 
@@ -516,8 +524,14 @@ overrideFit m fit =
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg m =
     let
-        ( next, cmd ) =
+        ( updated, updateCmd ) =
             updateInternal msg m
+
+        ( next, toastCmd ) =
+            notify msg m updated
+
+        cmd =
+            Cmd.batch [ updateCmd, toastCmd ]
     in
     ( next
     , if next.epoch /= m.epoch then
@@ -528,9 +542,95 @@ update msg m =
     )
 
 
+notify : Msg -> Model -> Model -> ( Model, Cmd Msg )
+notify msg before next =
+    let
+        newFeedback =
+            case msg of
+                Saved _ _ ->
+                    True
+
+                Submit ->
+                    True
+
+                Save _ ->
+                    True
+
+                ApplySaved _ _ ->
+                    True
+
+                Cancel ->
+                    True
+
+                _ ->
+                    False
+
+        changed =
+            if next.error /= "" && (next.error /= before.error || newFeedback) then
+                Just ( "error", next.error )
+
+            else if next.previewError /= "" && next.previewError /= before.previewError then
+                Just ( "preview", next.previewError )
+
+            else if next.notice /= "" && (next.notice /= before.notice || newFeedback) then
+                Just
+                    ( if String.startsWith "Cancelled" next.notice then
+                        "cancel"
+
+                      else
+                        "notice"
+                    , next.notice
+                    )
+
+            else
+                Nothing
+    in
+    case changed of
+        Just ( kind, message ) ->
+            ( { next | toast = Just { id = next.nextToastId, message = message, kind = kind }, nextToastId = next.nextToastId + 1 }
+            , if kind == "notice" then
+                Process.sleep 6000 |> Task.perform (\_ -> DismissToast next.nextToastId)
+
+              else
+                Cmd.none
+            )
+
+        Nothing ->
+            ( { next
+                | toast =
+                    next.toast
+                        |> Maybe.andThen
+                            (\toast ->
+                                if (toast.kind == "error" && next.error == "") || (toast.kind == "preview" && next.previewError == "") || (List.member toast.kind [ "notice", "cancel" ] && next.notice == "") then
+                                    Nothing
+
+                                else
+                                    Just toast
+                            )
+              }
+            , Cmd.none
+            )
+
+
 updateInternal : Msg -> Model -> ( Model, Cmd Msg )
 updateInternal msg m =
     case msg of
+        DismissToast id ->
+            ( { m
+                | toast =
+                    m.toast
+                        |> Maybe.andThen
+                            (\toast ->
+                                if toast.id == id then
+                                    Nothing
+
+                                else
+                                    Just toast
+                            )
+              }
+            , Cmd.none
+            )
+
         Uploaded progress ->
             if m.busy then
                 case progress of
@@ -550,7 +650,39 @@ updateInternal msg m =
             ( m, Cmd.none )
 
         Browse append ->
-            ( m, File.Select.files [ "application/pdf", "image/png", "image/jpeg" ] (Picked append) )
+            if m.busy then
+                ( m, Cmd.none )
+
+            else
+                ( m, File.Select.files [ "application/pdf", "image/png", "image/jpeg" ] (Picked append) )
+
+        SetWorkspaceMenu open ->
+            ( { m | workspaceMenu = open }, Cmd.none )
+
+        SetPresetsOpen open ->
+            ( { m | presetsOpen = open, dropdowns = Dict.empty }, Cmd.none )
+
+        WorkspaceAction action ->
+            let
+                next =
+                    { m | workspaceMenu = False }
+            in
+            case action of
+                "add" ->
+                    update (Browse True) next
+
+                "replace" ->
+                    update (Browse False) next
+
+                "clear" ->
+                    if m.busy then
+                        ( next, Cmd.none )
+
+                    else
+                        update (OpenDialog "clear") next
+
+                _ ->
+                    ( next, Cmd.none )
 
         Picked append first rest ->
             intake append (first :: rest) m
@@ -603,47 +735,32 @@ updateInternal msg m =
             else
                 commitFiles { m | pending = files, attempted = files }
 
-        Move id offset ->
+        Reordered change ->
             if m.busy then
                 ( m, Cmd.none )
 
             else
                 let
-                    index =
-                        List.indexedMap Tuple.pair m.files |> List.filter (\( _, f ) -> f.id == id) |> List.head |> Maybe.map Tuple.first |> Maybe.withDefault 0
-
-                    target =
-                        clamp 0 (List.length m.files - 1) (index + offset)
-
-                    moving =
-                        List.filter (\f -> f.id == id) m.files
-
-                    rest =
-                        List.filter (\f -> f.id /= id) m.files
-
-                    files =
-                        List.take target rest ++ moving ++ List.drop target rest
+                    result =
+                        Reorderable.apply change m.fileOrder
                 in
-                let
-                    ( next, cmd ) =
-                        commitFiles { m | pending = files, attempted = files }
-                in
-                ( next, Cmd.batch [ cmd, bridge "focus" [ ( "id", E.string ("file-row-" ++ String.fromInt id) ) ] ] )
+                case result.order of
+                    Nothing ->
+                        ( { m | fileOrder = result.state }, Cmd.none )
 
-        Drag id ->
-            ( { m | dragId = Just id }, Cmd.none )
+                    Just order ->
+                        if List.sort order /= List.sort (List.map (.id >> String.fromInt) m.files) then
+                            ( m, Cmd.none )
 
-        DropOn id ->
-            case m.dragId of
-                Nothing ->
-                    ( m, Cmd.none )
+                        else
+                            let
+                                files =
+                                    List.concatMap (\id -> List.filter (\f -> String.fromInt f.id == id) m.files) order
 
-                Just dragged ->
-                    let
-                        find key =
-                            List.indexedMap Tuple.pair m.files |> List.filter (\( _, f ) -> f.id == key) |> List.head |> Maybe.map Tuple.first |> Maybe.withDefault 0
-                    in
-                    update (Move dragged (find id - find dragged)) { m | dragId = Nothing }
+                                ( next, cmd ) =
+                                    commitFiles { m | pending = files, attempted = files, fileOrder = result.state }
+                            in
+                            ( next, Cmd.batch [ cmd, Reorderable.focus "file-queue" change (\_ -> NoOp) ] )
 
         Switch op ->
             if m.busy || op == m.operation then
@@ -652,7 +769,7 @@ updateInternal msg m =
             else
                 let
                     next =
-                        { m | operation = op, error = "", notice = "", epoch = m.epoch + 1, revision = m.revision + 1, previewToken = m.previewToken + 1 }
+                        { m | operation = op, presetsOpen = False, dropdowns = Dict.empty, error = "", notice = "", epoch = m.epoch + 1, revision = m.revision + 1, previewToken = m.previewToken + 1, selectedImpression = Nothing }
 
                     ( updated, cmd ) =
                         if op == Impose then
@@ -669,6 +786,80 @@ updateInternal msg m =
 
         Field key value ->
             field key value m
+
+        DropdownChanged key previous change ->
+            let
+                next =
+                    { m | dropdowns = Dict.singleton key change.state }
+
+                ( updated, command ) =
+                    if change.value == previous then
+                        ( next, Cmd.none )
+
+                    else if key == "tool" then
+                        operations m.files
+                            |> List.filter (\op -> operationLabel op == change.value)
+                            |> List.head
+                            |> Maybe.map (\op -> updateInternal (Switch op) { next | dropdowns = Dict.empty })
+                            |> Maybe.withDefault ( next, Cmd.none )
+
+                    else if key == "apply-preset" then
+                        updateInternal (ApplyPreset change.value) next
+
+                    else
+                        field key change.value next
+            in
+            ( updated, Cmd.batch [ command, View.revealDropdown key updated ] )
+
+        SelectImpression index page ->
+            if m.operation == Impose && page >= 1 && page <= Maybe.withDefault 0 m.request.sourcePageCount then
+                ( { m
+                    | selectedPage = page
+                    , selectedImpression = Just index
+                    , drafts =
+                        if page == m.selectedPage then
+                            m.drafts
+
+                        else
+                            artworkDrafts m.drafts
+                  }
+                , Cmd.none
+                )
+
+            else
+                ( m, Cmd.none )
+
+        RotateArtwork page rotation ->
+            if m.busy || m.operation /= Impose || page < 1 || page > Maybe.withDefault 0 m.request.sourcePageCount || not (List.member rotation [ 0, 90, 180, 270 ]) then
+                ( m, Cmd.none )
+
+            else
+                let
+                    ( next, cmd ) =
+                        schedule { m | request = updateOverride { m | selectedPage = page } (\p -> { p | rotationDegrees = rotation }), artworkMenu = Nothing }
+                in
+                ( next, Cmd.batch [ cmd, bridge "closeArtworkMenu" [] ] )
+
+        RotateAllArtwork rotation ->
+            if m.busy || m.operation /= Impose || Maybe.withDefault 0 m.request.sourcePageCount < 1 || not (List.member rotation [ 0, 90, 180, 270 ]) then
+                ( m, Cmd.none )
+
+            else
+                let
+                    r =
+                        m.request
+
+                    overrides =
+                        Dict.fromList (List.map (\p -> ( p.pageNumber, p )) r.pageOverrides)
+
+                    rotate page =
+                        let
+                            old =
+                                Dict.get page overrides |> Maybe.withDefault { pageNumber = page, rotationDegrees = 0, finishedCutSize = Nothing, artworkFit = Nothing }
+                        in
+                        { old | rotationDegrees = rotation }
+                in
+                schedule { m | request = { r | pageOverrides = List.map rotate (List.range 1 (Maybe.withDefault 0 r.sourcePageCount)) } }
 
         CropAnchor x y ->
             let
@@ -700,8 +891,8 @@ updateInternal msg m =
                 schedule { m | quantityDrafts = drafts, request = withQuantities qs m.request }
 
         SetStep step ->
-            if step >= 0 && step <= 3 then
-                ( { m | step = step, rail = "setup" }, bridge "focus" [ ( "id", E.string ("setup-tab-" ++ String.fromInt step) ) ] )
+            if step >= 0 && step <= 2 then
+                ( { m | step = step, rail = "setup", dropdowns = Dict.empty }, bridge "focus" [ ( "id", E.string ("setup-tab-" ++ String.fromInt step) ) ] )
 
             else
                 ( m, Cmd.none )
@@ -748,7 +939,7 @@ updateInternal msg m =
                 ( fresh, _ ) =
                     init m.theme
             in
-            ( { fresh | epoch = m.epoch + 1, revision = m.revision + 1, previewToken = m.previewToken + 1, presets = m.presets, recent = m.recent, history = m.history }, Cmd.batch [ Http.cancel "inspection", Http.cancel "layout", bridge "clearPreviews" [], Maybe.map (.sourceId >> (\id -> delete ("gang-up/sources/" ++ id))) m.source |> Maybe.withDefault Cmd.none ] )
+            ( { fresh | epoch = m.epoch + 1, revision = m.revision + 1, previewToken = m.previewToken + 1, presets = m.presets, recent = m.recent, nextToastId = m.nextToastId }, Cmd.batch [ Http.cancel "inspection", Http.cancel "layout", bridge "clearPreviews" [], Maybe.map (.sourceId >> (\id -> delete ("gang-up/sources/" ++ id))) m.source |> Maybe.withDefault Cmd.none ] )
 
         Cancel ->
             ( { m | epoch = m.epoch + 1, revision = m.revision + 1, previewToken = m.previewToken + 1, previewLoading = False, busy = False, job = Nothing, phase = "", notice = "Cancelled. Your files and settings are retained." }, Cmd.batch [ Http.cancel "inspection", Http.cancel "layout", bridge "cancelPreview" [], Maybe.map (discardJob m.jobKind) m.job |> Maybe.withDefault Cmd.none ] )
@@ -839,14 +1030,7 @@ updateInternal msg m =
 
                             else
                                 ( { m | progress = 100, phase = "Downloading", error = "" }
-                                , Cmd.batch
-                                    [ bridge "download" [ ( "token", E.int m.epoch ), ( "url", E.string ("jobs/" ++ id ++ "/download") ), ( "filename", E.string status.filename ) ]
-                                    , if m.operation == Impose then
-                                        catalog "export-history"
-
-                                      else
-                                        Cmd.none
-                                    ]
+                                , bridge "download" [ ( "token", E.int m.epoch ), ( "url", E.string ("jobs/" ++ id ++ "/download") ), ( "filename", E.string status.filename ) ]
                                 )
 
                         else if status.state == "error" then
@@ -921,6 +1105,7 @@ updateInternal msg m =
                                     , error = ""
                                     , job = Nothing
                                     , selectedPage = 1
+                                    , selectedImpression = Nothing
                                     , sheet = 0
                                     , back = False
                                     , quantityDrafts = Dict.empty
@@ -959,11 +1144,19 @@ updateInternal msg m =
                     Ok layout ->
                         preview { m | layout = Just layout, layoutReady = True, error = "", sheet = min m.sheet (max 0 (layout.sheetsRequired - 1)), retryKind = "" }
 
+        SharedBrowserResponse value ->
+            case ElmBrowser.decode value of
+                Ok (ElmBrowser.Failed "theme" _) ->
+                    ( { m | notice = "Theme changed for this tab. Your browser could not save the preference." }, Cmd.none )
+
+                _ ->
+                    ( m, Cmd.none )
+
         BrowserEvent event ->
             browserEvent event m
 
         Navigate sheet back ->
-            preview { m | sheet = max 0 sheet, back = back }
+            preview { m | sheet = max 0 sheet, back = back, selectedImpression = Nothing }
 
         Lease _ ->
             ( m, Maybe.map (.sourceId >> (\id -> request "PUT" ("gang-up/sources/" ++ id ++ "/lease") Http.emptyBody (expect (\_ -> NoOp) Ok) Nothing)) m.source |> Maybe.withDefault Cmd.none )
@@ -984,7 +1177,7 @@ updateInternal msg m =
                                     D.decodeValue (D.list A.recentGangUpJobDecoder) value |> Result.map (\xs -> { m | recent = xs })
 
                                 _ ->
-                                    D.decodeValue (D.list A.gangUpExportRecordDecoder) value |> Result.map (\xs -> { m | history = xs })
+                                    D.decodeValue (D.fail "Unknown saved-work catalog.") value
                     in
                     case decoded of
                         Ok next ->
@@ -1034,6 +1227,7 @@ updateInternal msg m =
                                         else
                                             Nothing
                                 }
+                            , dialog = m.dialog
                             , drafts = Dict.empty
                             , chosenWidth = True
                             , chosenHeight = True
@@ -1055,7 +1249,7 @@ updateInternal msg m =
                         List.filter (\p -> p.id == id) m.recent |> List.head |> Maybe.map .request
 
                     else
-                        List.filter (\p -> p.id == id) m.history |> List.head |> Maybe.map .request
+                        Nothing
             in
             case ( saved, m.source ) of
                 ( Just r, Just source ) ->
@@ -1203,6 +1397,16 @@ field key value m =
         "name" ->
             ( { m | savedName = value }, Cmd.none )
 
+        "artwork-rotation" ->
+            update
+                (if m.perArtwork then
+                    RotateArtwork m.selectedPage (String.toInt value |> Maybe.withDefault -1)
+
+                 else
+                    RotateAllArtwork (String.toInt value |> Maybe.withDefault -1)
+                )
+                m
+
         "page" ->
             preview { m | selectedPage = String.toInt value |> Maybe.withDefault 1, drafts = artworkDrafts m.drafts }
 
@@ -1260,19 +1464,30 @@ field key value m =
 
                     else
                         single
-            in
-            schedule
-                { m
-                    | request =
-                        if value == "repeat" && not (List.isEmpty qs) then
-                            withQuantities qs next
 
-                        else
-                            next
-                    , repeatSingle = single
-                    , repeatDouble = double
-                    , quantityDrafts = Dict.empty
-                }
+                ( changed, command ) =
+                    schedule
+                        { m
+                            | request =
+                                if value == "repeat" && not (List.isEmpty qs) then
+                                    withQuantities qs next
+
+                                else
+                                    next
+                            , repeatSingle = single
+                            , repeatDouble = double
+                            , quantityDrafts = Dict.empty
+                        }
+            in
+            if value == "repeat" then
+                let
+                    ( opened, dialogCommand ) =
+                        update (OpenDialog "quantities") changed
+                in
+                ( opened, Cmd.batch [ command, dialogCommand ] )
+
+            else
+                ( changed, command )
 
         "sides" ->
             let
@@ -1439,9 +1654,6 @@ field key value m =
                         }
                 }
 
-        "rotation" ->
-            schedule { m | request = { r | manual = Just { manual | rotationDegrees = String.toInt value |> Maybe.withDefault 0 } } }
-
         _ ->
             setNumber key value { m | autoFinishedSize = m.autoFinishedSize && not (List.member key [ "finished-width", "finished-height" ]) }
 
@@ -1468,10 +1680,23 @@ toggle key m =
                     else
                         "dark"
             in
-            ( { m | theme = theme }, bridge "theme" [ ( "value", E.string theme ) ] )
+            ( { m | theme = theme }
+            , Cmd.batch
+                [ bridge "theme" [ ( "value", E.string theme ) ]
 
-        "collapse" ->
-            ( { m | collapsed = not m.collapsed }, Cmd.none )
+                -- Keep the existing raw-string preference readable by older builds.
+                , browserRequest
+                    (E.object
+                        [ ( "version", E.int 1 )
+                        , ( "id", E.string "theme" )
+                        , ( "action", E.string "storage.set" )
+                        , ( "session", E.bool False )
+                        , ( "key", E.string "theme" )
+                        , ( "value", E.string theme )
+                        ]
+                    )
+                ]
+            )
 
         "per-artwork" ->
             ( { m | perArtwork = not m.perArtwork, drafts = artworkDrafts m.drafts }, Cmd.none )
@@ -1505,27 +1730,6 @@ toggle key m =
                                     }
                         }
                 }
-
-        "cut" ->
-            ( { m | showCut = not m.showCut }, Cmd.none )
-
-        "bleed-lines" ->
-            ( { m | showBleed = not m.showBleed }, Cmd.none )
-
-        "gutters" ->
-            ( { m | showGutters = not m.showGutters }, Cmd.none )
-
-        "paths" ->
-            ( { m | showPaths = not m.showPaths }, Cmd.none )
-
-        "zoom-in" ->
-            ( { m | zoom = min 3 (m.zoom + 0.25) }, Cmd.none )
-
-        "zoom-out" ->
-            ( { m | zoom = max 0.5 (m.zoom - 0.25) }, Cmd.none )
-
-        "zoom-fit" ->
-            ( { m | zoom = 1 }, Cmd.none )
 
         _ ->
             ( m, Cmd.none )
@@ -1725,6 +1929,22 @@ browserEvent event m =
         "theme" ->
             ( { m | theme = get "value" D.string m.theme }, Cmd.none )
 
+        "artworkMenu" ->
+            let
+                page =
+                    get "page" D.int 0
+            in
+            if m.operation == Impose && not m.busy && m.layoutReady && not m.previewLoading && page >= 1 && page <= Maybe.withDefault 0 m.request.sourcePageCount then
+                ( { m | selectedPage = page, selectedImpression = Just (get "index" D.int 0), artworkMenu = Just page, drafts = artworkDrafts m.drafts }
+                , bridge "artworkMenu" [ ( "x", E.float (get "x" D.float 0) ), ( "y", E.float (get "y" D.float 0) ), ( "trigger", E.string (get "trigger" D.string "") ) ]
+                )
+
+            else
+                ( m, Cmd.none )
+
+        "closeArtworkMenu" ->
+            ( { m | artworkMenu = Nothing }, Cmd.none )
+
         "closeDialog" ->
             ( { m | dialog = "" }, Cmd.none )
 
@@ -1751,7 +1971,7 @@ artworkDrafts drafts =
 
 save : String -> Model -> ( Model, Cmd Msg )
 save kind m =
-    if not (validSetup m) || not m.layoutReady || String.isEmpty (String.trim m.savedName) then
+    if not (validSetup m) || (kind /= "presets" && not m.layoutReady) || String.isEmpty (String.trim m.savedName) then
         ( { m | error = "Enter a name and complete a valid setup before saving." }, Cmd.none )
 
     else
@@ -1778,7 +1998,7 @@ save kind m =
                 else
                     ( "POST", "gang-up/recent-jobs" )
         in
-        ( { m | retryKind = "save:" ++ kind }, request method url (Http.jsonBody payload) (jsonExpect (Saved kind) D.value) Nothing )
+        ( { m | retryKind = "save:" ++ kind, error = "", notice = "" }, request method url (Http.jsonBody payload) (jsonExpect (Saved kind) D.value) Nothing )
 
 
 discardJob : String -> String -> Cmd Msg

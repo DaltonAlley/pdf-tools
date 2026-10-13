@@ -42,8 +42,8 @@ try:
         raise RuntimeError('Container did not become healthy')
     with urllib.request.urlopen(url) as response:
         html = response.read().decode()
-    assets = set(re.findall(r'assets/[a-f0-9]{16}/(?:elm\.js|bridge\.js|app\.css)', html))
-    assert len(assets) == 3, assets
+    assets = set(re.findall(r'assets/[a-f0-9]{16}/(?:elm\.js|bootstrap\.js|bridge\.js|da-components\.js|app\.css)', html))
+    assert len(assets) == 5, assets
     for asset in assets:
         request = urllib.request.Request(url+'/'+asset, headers={'Accept-Encoding':'gzip'})
         with urllib.request.urlopen(request) as response:

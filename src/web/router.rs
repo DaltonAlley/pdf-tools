@@ -166,17 +166,6 @@ pub fn app_with_frontend_dist(
             axum::routing::delete(super::gang_up_catalog::delete_recent_job),
         )
         .route(
-            "/gang-up/export-history",
-            get(super::gang_up_catalog::export_history)
-                .post(super::gang_up_catalog::create_export_history_record)
-                .layer(DefaultBodyLimit::max(MAX_LAYOUT_JSON_BYTES)),
-        )
-        .route(
-            "/gang-up/export-history/{id}",
-            get(super::gang_up_catalog::download_export_history_record)
-                .delete(super::gang_up_catalog::delete_export_history_record),
-        )
-        .route(
             "/gang-up/sources/{id}",
             axum::routing::delete(super::gang_up::delete_source),
         )
@@ -263,6 +252,77 @@ mod tests {
         let state = Arc::new(AppState::for_tests(pdfium.shared()).unwrap());
 
         assert!(app(state, usize::MAX.into()).is_err());
+    }
+
+    #[tokio::test]
+    async fn frontend_bundle_is_served_from_explicit_directory() {
+        let Some(pdfium) = crate::test_pdfium() else {
+            return;
+        };
+        let root = std::env::temp_dir().join(format!(
+            "pdf-tools-frontend-delivery-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("assets/test-build")).unwrap();
+        std::fs::write(root.join("app.html"), "<title>PDF Tools</title>").unwrap();
+        for name in [
+            "elm.js",
+            "bootstrap.js",
+            "bridge.js",
+            "da-components.js",
+            "app.css",
+        ] {
+            std::fs::write(root.join("assets/test-build").join(name), name).unwrap();
+        }
+        let state = Arc::new(AppState::for_tests(pdfium.shared()).unwrap());
+        let router =
+            app_with_frontend_dist(state, None, FrontendDist::validate(&root).unwrap()).unwrap();
+        for (url, content_type, body) in [
+            ("/", "text/html", "<title>PDF Tools</title>"),
+            ("/assets/test-build/elm.js", "javascript", "elm.js"),
+            (
+                "/assets/test-build/bootstrap.js",
+                "javascript",
+                "bootstrap.js",
+            ),
+            ("/assets/test-build/bridge.js", "javascript", "bridge.js"),
+            (
+                "/assets/test-build/da-components.js",
+                "javascript",
+                "da-components.js",
+            ),
+            ("/assets/test-build/app.css", "text/css", "app.css"),
+        ] {
+            let response = router
+                .clone()
+                .oneshot(Request::get(url).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), axum::http::StatusCode::OK, "{url}");
+            assert!(
+                response.headers()[axum::http::header::CONTENT_TYPE]
+                    .to_str()
+                    .unwrap()
+                    .contains(content_type),
+                "{url}"
+            );
+            assert_eq!(
+                axum::body::to_bytes(response.into_body(), 1024)
+                    .await
+                    .unwrap(),
+                body
+            );
+        }
+        let response = router
+            .oneshot(Request::get("/missing.js").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[tokio::test]

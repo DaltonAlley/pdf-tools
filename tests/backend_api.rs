@@ -1797,13 +1797,7 @@ async fn gang_up_export_returns_pdf_download_with_parent_sheet_pages() {
         "application/pdf"
     );
     assert!(content_disposition(&response).contains("imposed.pdf"));
-    let export_id = response
-        .headers()
-        .get("x-gang-up-export-id")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .to_string();
+    assert!(response.headers().get("x-gang-up-export-id").is_none());
     let exported_bytes = body_bytes(response).await;
     let exported = pdfium
         .load_pdf_from_byte_vec(exported_bytes.clone(), None)
@@ -1814,11 +1808,7 @@ async fn gang_up_export_returns_pdf_download_with_parent_sheet_pages() {
     assert!((first.height().value - 18.0 * 72.0).abs() < 0.01);
 
     let history = send(state.clone(), get_request("/gang-up/export-history")).await;
-    assert_eq!(history.status(), StatusCode::OK);
-    let history: serde_json::Value = serde_json::from_str(&body_text(history).await).unwrap();
-    assert_eq!(history.as_array().unwrap().len(), 1);
-    assert_eq!(history[0]["id"], export_id);
-    assert_eq!(history[0]["outputType"], "cleanPdf");
+    assert_eq!(history.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
@@ -1880,7 +1870,7 @@ async fn gang_up_export_flattens_printable_annotations_into_the_artwork() {
 
 #[tokio::test]
 #[serial(pdfium)]
-async fn gang_up_download_limit_is_checked_before_export_history_is_written() {
+async fn gang_up_download_limit_rejects_oversized_export() {
     let Some(state) = state_with_download_limit_or_skip(1) else {
         return;
     };
@@ -1905,20 +1895,17 @@ async fn gang_up_download_limit_is_checked_before_export_history_is_written() {
     .await;
 
     assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
-    let history = send(state, get_request("/gang-up/export-history")).await;
-    assert_eq!(history.status(), StatusCode::OK);
-    assert_eq!(body_text(history).await, "[]");
 }
 
 #[tokio::test]
 #[serial(pdfium)]
-async fn gang_up_export_download_survives_unavailable_history_storage() {
+async fn gang_up_export_removes_legacy_archives_and_does_not_store_downloads() {
     let Some(pdfium) = test_pdfium() else {
         eprintln!("skipping backend API test: PDFium is unavailable");
         return;
     };
     let data_path = std::env::temp_dir().join(format!(
-        "pdf-tools-history-unavailable-{}-{}",
+        "pdf-tools-no-export-history-{}-{}",
         std::process::id(),
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -1926,12 +1913,17 @@ async fn gang_up_export_download_survives_unavailable_history_storage() {
             .as_nanos()
     ));
     fs::create_dir_all(&data_path).unwrap();
-    fs::write(data_path.join("gang-up-export-files"), b"not a directory").unwrap();
+    let archive = data_path.join("gang-up-export-files");
+    fs::create_dir(&archive).unwrap();
+    fs::write(archive.join("previous.pdf"), b"%PDF-previous").unwrap();
+    fs::write(data_path.join("gang-up-export-history.json"), b"[]").unwrap();
+    let sentinel = data_path.join("unrelated-settings.json");
+    fs::write(&sentinel, b"preserve").unwrap();
     let state =
         Arc::new(AppState::for_tests_with_data_dir(pdfium.clone(), data_path.clone()).unwrap());
 
     let response = send(
-        state,
+        state.clone(),
         multipart_request(
             "/gang-up/export",
             vec![
@@ -1956,6 +1948,28 @@ async fn gang_up_export_download_survives_unavailable_history_storage() {
         .get("x-gang-up-cut-plan-export-id")
         .is_none());
     assert!(body_bytes(response).await.starts_with(b"%PDF"));
+    assert!(!archive.exists());
+    assert!(!data_path.join("gang-up-export-history.json").exists());
+    assert_eq!(fs::read(&sentinel).unwrap(), b"preserve");
+    for route in [
+        "/gang-up/export-history",
+        "/gang-up/export-history/previous",
+    ] {
+        assert_eq!(
+            send(state.clone(), get_request(route)).await.status(),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            send(state.clone(), delete_request(route)).await.status(),
+            StatusCode::METHOD_NOT_ALLOWED
+        );
+        assert_eq!(
+            send(state.clone(), json_request(route, serde_json::json!({})))
+                .await
+                .status(),
+            StatusCode::METHOD_NOT_ALLOWED
+        );
+    }
     fs::remove_dir_all(data_path).unwrap();
 }
 

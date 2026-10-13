@@ -1,7 +1,57 @@
 /* Browser-owned resources only. Workflow decisions, validation, forms, HTTP
    jobs, and production geometry belong to Elm/Rust. No secure-context APIs. */
+import { install } from './da-components.js';
+
 export function connect(app) {
+  install(document.getElementById('pdf-ui'));
   const send = event => app.ports.browserEvents.send(event);
+  let artworkTrigger;
+  const closeArtworkMenu = (restore = false) => {
+    const menu = document.getElementById('artwork-context-menu');
+    const wasOpen = menu?.matches(':popover-open');
+    if (wasOpen) menu.hidePopover();
+    if (restore && wasOpen) requestAnimationFrame(() => artworkTrigger?.isConnected && artworkTrigger.focus({preventScroll:true}));
+  };
+  const openArtworkMenu = (item, x, y) => {
+    if (item.dataset.artworkDisabled === 'true') return;
+    send({action:'artworkMenu', page:Number(item.dataset.artworkPage), index:Number(item.dataset.impressionIndex), x, y, trigger:item.id});
+  };
+  document.addEventListener('contextmenu', event => {
+    const item = event.target.closest('.sheet-item');
+    if (!item) return;
+    event.preventDefault();
+    const bounds = item.querySelector('.piece-hit-area').getBoundingClientRect();
+    openArtworkMenu(item, event.clientX || bounds.x, event.clientY || bounds.y);
+  });
+  document.addEventListener('keydown', event => {
+    const item = event.target.closest('.sheet-item');
+    if (item && (['ContextMenu','Enter',' '].includes(event.key) || (event.shiftKey && event.key === 'F10'))) {
+      event.preventDefault();
+      const bounds = item.querySelector('.piece-hit-area').getBoundingClientRect();
+      openArtworkMenu(item, bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+      return;
+    }
+    const menu = event.target.closest('#artwork-context-menu');
+    if (!menu) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeArtworkMenu(true);
+    } else if (event.key === 'Tab') {
+      closeArtworkMenu();
+      artworkTrigger?.focus({preventScroll:true});
+    } else if (['ArrowDown','ArrowUp','Home','End'].includes(event.key)) {
+      event.preventDefault();
+      const items = [...menu.querySelectorAll('button:not(:disabled)')];
+      const index = items.indexOf(document.activeElement);
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+      items[next]?.focus();
+    }
+  });
+  document.addEventListener('toggle', event => {
+    if (event.target.id === 'artwork-context-menu' && event.newState === 'closed') send({action:'closeArtworkMenu'});
+  }, true);
+  document.addEventListener('scroll', () => closeArtworkMenu(), true);
+  window.addEventListener('resize', () => closeArtworkMenu());
   let workspaceFrame, workspaceAnimations = [];
   const stopWorkspaceTransition = () => {
     cancelAnimationFrame(workspaceFrame);
@@ -14,6 +64,7 @@ export function connect(app) {
   const animateWorkspace = () => {
     const shell = document.querySelector('.elm-shell');
     if (!shell) return;
+    const wasGeneric = shell.classList.contains('generic-shell');
     // Capture the current visual bounds before Elm renders the new workflow.
     // This also lets a reversed transition continue from its current position.
     const frames = ['.app-header', '.ready-shell', '.ready-card'].map(selector => {
@@ -25,12 +76,16 @@ export function connect(app) {
     workspaceFrame = requestAnimationFrame(() => {
       if (!shell.isConnected || shell.classList.contains('empty-shell')) return;
       const style = getComputedStyle(shell);
-      const options = {duration:parseFloat(style.getPropertyValue('--workspace-duration')), easing:style.getPropertyValue('--workspace-easing').trim()};
+      const genericSwitch = wasGeneric && shell.classList.contains('generic-shell');
+      const options = {duration:genericSwitch ? 220 : parseFloat(style.getPropertyValue('--workspace-duration')), easing:style.getPropertyValue('--workspace-easing').trim()};
+      // Measure the settled layout before temporary animation alignment changes
+      // the header's intrinsic width. Otherwise it shrinks too far, then jumps
+      // back to its stretched width when the animation is removed.
+      const targets = frames.filter(frame => frame.element.isConnected).map(frame => ({...frame, next:frame.element.getBoundingClientRect(), nextRadius:getComputedStyle(frame.element).borderRadius}));
       // Keep the grid's final positions fixed while the child frames resize;
       // centering must not shift a second time during the return animation.
       shell.style.setProperty('--workspace-rows', style.gridTemplateRows);
       shell.setAttribute('data-workspace-animating', '');
-      const targets = frames.filter(frame => frame.element.isConnected).map(frame => ({...frame, next:frame.element.getBoundingClientRect(), nextRadius:getComputedStyle(frame.element).borderRadius}));
       workspaceAnimations = targets.map(({element, bounds, radius, next, nextRadius}) => {
         const shape = {borderRadius:radius, height:`${bounds.height}px`};
         const settled = {borderRadius:nextRadius, height:`${next.height}px`};
@@ -49,7 +104,7 @@ export function connect(app) {
   window.addEventListener('resize', stopWorkspaceTransition);
   matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', stopWorkspaceTransition);
   const cache = new Map();
-  let protectedUrls = new Set(), previewController, downloadController, activeSource, restoreFocus, identity = 0;
+  let protectedUrls = new Set(), previewController, downloadController, activeSource, identity = 0;
   let cacheBytes = 0;
   const revoke = key => {
     const asset = cache.get(key);
@@ -157,6 +212,19 @@ export function connect(app) {
   app.ports.resources.subscribe(command => {
     switch(command.action) {
       case 'workspaceTransition': animateWorkspace(); break;
+      case 'artworkMenu':
+        requestAnimationFrame(() => {
+          const menu = document.getElementById('artwork-context-menu');
+          artworkTrigger = document.getElementById(command.trigger);
+          if (!menu || !artworkTrigger || artworkTrigger.dataset.artworkDisabled === 'true') return;
+          menu.showPopover();
+          const bounds = menu.getBoundingClientRect();
+          menu.style.left = `${Math.max(8,Math.min(command.x,innerWidth-bounds.width-8))}px`;
+          menu.style.top = `${Math.max(8,Math.min(command.y,innerHeight-bounds.height-8))}px`;
+          menu.querySelector('button:not(:disabled)')?.focus({preventScroll:true});
+        });
+        break;
+      case 'closeArtworkMenu': closeArtworkMenu(true); break;
       case 'identity': identity = command.token; downloadController?.abort(); break;
       case 'preview': void preview(command); break;
       case 'cancelPreview': previewController?.abort(); break;
@@ -169,36 +237,16 @@ export function connect(app) {
       case 'download': void download(command); break;
       case 'theme':
         document.documentElement.dataset.theme = command.value;
-        try { localStorage.setItem('pdf-tools-theme',command.value); } catch (_) {}
         break;
       case 'focus': requestAnimationFrame(() => document.getElementById(command.id)?.focus()); break;
       case 'dialog':
-        restoreFocus = document.activeElement;
-        requestAnimationFrame(() => {
-          const dialog = document.getElementById(command.id);
-          dialog?.showModal();
-          dialog?.querySelector('input, button')?.focus();
-        });
-        break;
       case 'closeDialog':
-        document.getElementById('workspace-dialog')?.close();
-        requestAnimationFrame(() => restoreFocus?.isConnected && restoreFocus.focus());
+        // Da.Dialog's adapter owns modality and focus restoration.
         break;
     }
   });
   const visible = () => { if (document.visibilityState === 'visible') send({action:'visible'}); };
   document.addEventListener('visibilitychange',visible);
-  const fitPopover = details => {
-    const panel = details?.matches?.('.elm-toolbar details[open]') && details.querySelector(':scope > fieldset');
-    if (panel) {
-      const left=details.getBoundingClientRect().left;
-      panel.style.right='auto';
-      panel.style.left=`${Math.max(8,Math.min(left,innerWidth-panel.offsetWidth-8))-left}px`;
-      panel.style.maxHeight = `${Math.max(80,Math.min(580,innerHeight-panel.getBoundingClientRect().top-12))}px`;
-    }
-  };
-  document.addEventListener('toggle',event => requestAnimationFrame(() => fitPopover(event.target)),true);
-  window.addEventListener('resize',() => document.querySelectorAll('.elm-toolbar details[open]').forEach(fitPopover));
   // FileList is not a JSON array; keep File objects native and adapt only the
   // browser event payload for Elm's File.decoder.
   document.addEventListener('drop',event => {

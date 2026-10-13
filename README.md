@@ -1,6 +1,7 @@
 # PDF Tools
 
-PDF Tools is a self-hosted web app with a Rust backend and Elm frontend. It
+PDF Tools is a self-hosted web app with a Rust backend and Elm frontend, started
+in the browser by the shared OCaml `elm-browser` library also used by Squire. It
 turns PDF pages into PNG or JPEG images, extracts selected pages as individual
 PDFs in a ZIP, merges PDFs, converts ordered PNG or JPEG images into a PDF, and
 imposes artwork onto print sheets.
@@ -19,7 +20,7 @@ fitting, and margins belong to other workflows.
 
 ## Make customer artwork into a print-ready flyer
 
-Choose **Impose artwork**. **Finished width** and **Finished height** automatically
+Choose **Impose artwork**. **Width** and **Height** automatically
 start at the finished cut dimensions of the first artwork page: a 5×7-inch PDF
 with a 0.125-inch bleed starts at 5×7 inches, not 5.25×7.25 inches. An explicit
 TrimBox or distinct CropBox takes precedence. Without cut metadata, common PDF
@@ -32,22 +33,22 @@ size until you edit it, choose a finished orientation, or apply a saved setup;
 those choices are retained when artwork changes. Mixed-size artwork shares the
 first page's default finished size.
 
+Use the **Fit**, **Fill**, and **Stretch** segmented field above the preview to choose
+how artwork fits the finished size.
+
 - **Fit** preserves proportions and content, with white borders
   where the source and finished shapes differ.
-- **Fill** preserves proportions and crops to the chosen frame.
-  Drag the artwork or use the crop-position sliders to choose what remains.
-  **Reset crop position** centers it again.
+- **Fill** preserves proportions and crops to the chosen frame, centered by
+  default. Saved crop positions are retained.
 - **Stretch** fills the finished size by scaling width and height independently.
-  It keeps the artwork but intentionally distorts its proportions. Crop controls
-  apply only to Fill.
+  It keeps the artwork but intentionally distorts its proportions.
 - **Scale to add bleed** enlarges the fitted artwork uniformly. The normalized
   crop position is retained relative to the bleed frame, but additional content
   can fall outside the finished cut. Review the cut boundary before downloading.
   Fill and Stretch cover the bleed frame; Fit can retain white borders. No mode
   invents missing edge content.
 - **Finished orientation** changes the product between Portrait and Landscape.
-  **Impression orientation** in the left setup column rotates its placement on the
-  sheet: Auto, Upright, or Quarter-turn. These are separate decisions.
+  Right-click an artwork item on the sheet to rotate that page independently.
 
 Use **Presets** to save an impose setup you expect to use again. The
 starter **5x7 on 12x18** preset is available without being applied automatically.
@@ -55,24 +56,44 @@ Applying a preset fills the finished size, sheet, fitting, bleed, arrangement,
 and printing choices without replacing the uploaded artwork or its page
 quantities. Presets can be created, renamed, updated, applied, or deleted.
 
-Artwork is a workspace-level global context exposed through the compact
-**Artwork** toolbar beside the sheet preview, not a separate Setup step. **Fit**,
-**Fill**, **Stretch**, and impression orientation stay available as you move
-between the Size, Quantity & sheet, Arrangement, and Bleed tabs. All four tabs
-are available immediately, including while settings are incomplete or a preview
+**Fit**, **Fill**, and **Stretch** stay directly available in the toolbar above
+the sheet preview as you move between the Size, Sheet, and Bleed tabs. Sheet
+contains quantity, sheet size, printing, gutter, margin, and duplex settings.
+Size contains finished dimensions, orientation, arrangement, and custom-grid
+settings. All three tabs are available immediately, including while settings are incomplete or a preview
 is loading. Use the arrow keys, Home, or End to navigate the tabs. Open the
-Artwork disclosure when you need fitting controls, crop positioning, per-artwork
-overrides, or source and bleed information. On narrow screens, the toolbar stays
+advanced sheet settings to adjust gutters, custom margins, or duplex behavior.
+On narrow screens, the toolbar stays
 outside the Setup panel while **Preview** remains focused on inspecting the
 sheet.
 
+Red dashed cut paths are always visible on the sheet preview. Black dotted
+rectangles show the outside bleed bounds where bleed is present, and the sheet
+fits its canvas automatically. **Presets**, **Previous sheet**, and **Next sheet**
+stay at the far right of the toolbar. Selection menus use the shared DA dropdown, and
+the header tool selector has a visible surface before hover. These controls stay
+in one row; on narrow screens,
+scroll the toolbar horizontally to reach them. Selecting an impression shows a
+blue outline with a narrow contrasting border around its finished cut,
+including while its rotation menu is open. The outline stays the same thickness
+as the canvas resizes.
+
+Right-click a piece on the sheet to rotate its artwork clockwise, counterclockwise,
+or 180°, or reset its rotation. The menu applies to all copies of that artwork
+page. Rotation happens before Fit/Fill/Stretch, so portrait and landscape sources
+can fill the same finished size without changing other pages. Keyboard users can
+focus a piece and press Enter or Shift+F10. Previously saved bulk rotations,
+fitting overrides, finished-size overrides, and crop positions remain supported
+when restoring job settings.
+
 Mixed-size PDF pages and images can share one manually defined finished size.
 Mixed pieces use regular slots large enough for the largest piece, with
-individual cut guides, not an optimized nesting algorithm. Select artwork to
-adjust its fitting or manually override its finished size independently. Duplex
+individual cut guides, not an optimized nesting algorithm. The toolbar fitting
+choices apply to all artwork; saved per-piece settings remain supported. Duplex
 pairs must have matching finished cuts, and odd source counts cannot be paired
-automatically. In **Edit copy quantities**, **Apply to all** commits the entered
-quantity to every page or pair and closes the dialog.
+automatically. In **Edit copy quantities**, **Apply to all** or Enter in
+**Copies for all** commits the entered quantity to every page or pair and closes
+the dialog.
 
 Gutters measure the gap between finished cuts; supplied bleed occupies that gap
 instead of being added to it. The layout increases an insufficient gap to keep
@@ -98,7 +119,8 @@ release attachment pins that release's immutable image digest. If using the Comp
 from the repository instead, `PDF_APP_VERSION` defaults to `0.2.17` and can be set
 in `.env` to select another published version.
 
-To build locally instead, clone <https://github.com/theupsstore7452/pdf-tools>, enter
+To build locally instead, clone <https://github.com/theupsstore7452/pdf-tools>
+with `--recurse-submodules` (or run `git submodule update --init --recursive`), enter
 its repository root, and run:
 
 ```sh
@@ -111,7 +133,9 @@ host because the app has no built-in authentication.
 
 Compose stores persistent application data in `./data` beside the Compose file
 and mounts it at `/app/data` in the container. This preserves impose presets,
-recent jobs, and export history when the container is replaced.
+and manually saved recent jobs when the container is replaced. Export history is
+not retained. On startup, the app removes legacy export-history metadata and
+archived export files from this directory.
 Impose uploads are staged in that mounted data directory so large artwork uses
 the host volume's capacity instead of the container's smaller temporary layer.
 Temporary background-job downloads do not survive a restart. Back up `./data`
@@ -199,8 +223,8 @@ requires only Docker. For the pinned development shell and full checks, run from
 that same repository root:
 
 ```sh
-nix develop .#pdf-app
-nu scripts/check.nu pdf-app
+nix develop
+just check
 ```
 
 Both deployments use the same port, optional `.env`, and persistent `./data`.
@@ -211,15 +235,20 @@ released-image deployment on the same port.
 
 The PDF app uses Rust 1.97.1 and Elm 0.19.1. The npm lockfile pins the Elm
 compiler, formatter, and test runner; no Rust WebAssembly target is required.
-The Nix `pdf-app` shell includes Rust, Node, PDFium, Python Playwright, PyMuPDF,
-Pillow, and patched Chromium and Firefox browsers:
+The default Nix shell (also available as `pdf-app`) includes Rust, Node/npm,
+PDFium, Python Playwright, PyMuPDF, Pillow, and patched Chromium and Firefox
+browsers:
 
 ```sh
-nix develop .#pdf-app
+nix develop
 just dev
 ```
 
-Without Nix, install Rust with Clippy and rustfmt, Node, and PDFium. Set
+`nix develop .#commands` provides the lightweight container command tools.
+Use the default shell for `just dev`, `just check`, and source builds.
+
+Without Nix, install Rust with Clippy and rustfmt, Node, PDFium, OCaml, Dune,
+and `js_of_ocaml`. Set
 `PDF_TOOLS_PDFIUM_PATH=/path/to/libpdfium.so` if PDFium is not on the library path.
 `just dev` installs the pinned npm dependencies, generates the API codecs, builds
 the frontend, starts Axum on <http://127.0.0.1:3200>, and watches frontend files.
@@ -236,14 +265,19 @@ just check         # formatting, lint, docs, contracts, builds, full acceptance
 ```
 
 Axum serves `frontend/dist/app.html` and its versioned JavaScript/CSS assets.
+The server resolves this directory from its working directory at startup;
+set `PDF_TOOLS_FRONTEND_DIR` to an absolute path to serve a bundle elsewhere.
+`just dev` sets this path to the current checkout. Missing entrypoints fail
+startup with the attempted path instead of leaving a running server with 404s.
 Deploy the complete distribution directory together. The build generates gzip
 sidecars and retains previous asset directories on incremental builds. The
 frontend uses relative API URLs and works on ordinary HTTP origins without
 `crypto.randomUUID`, clipboard permissions, or a secure context.
 
 Elm owns workflow state, files, HTTP uploads, validation, polling, and stale
-response rejection. The small [browser bridge](frontend/bridge.js) manages
-binary preview blobs, object URLs, downloads, storage, native dialog focus, and
+response rejection. The shared `elm-browser` OCaml library mounts the app and
+handles theme storage. The [PDF browser adapter](frontend/bridge.js) manages
+binary preview blobs, object URLs, downloads, native dialog focus, and
 crop pointer events. Rust remains authoritative for production geometry. See
 [frontend implementation notes](frontend/README.md) for resource lifecycles and
 the audited elm-rs generation boundary. The

@@ -387,6 +387,7 @@ sourcePageDecoder =
 
 type alias PageOverride =
     { pageNumber : Int
+    , rotationDegrees : Int
     , finishedCutSize : Maybe SizeInches
     , artworkFit : Maybe ArtworkFit
     }
@@ -396,6 +397,7 @@ pageOverrideEncoder : PageOverride -> Json.Encode.Value
 pageOverrideEncoder struct =
     Json.Encode.object
         [ ( "pageNumber", Json.Encode.int struct.pageNumber )
+        , ( "rotationDegrees", Json.Encode.int struct.rotationDegrees )
         , ( "finishedCutSize", (Maybe.withDefault Json.Encode.null << Maybe.map sizeInchesEncoder) struct.finishedCutSize )
         , ( "artworkFit", (Maybe.withDefault Json.Encode.null << Maybe.map artworkFitEncoder) struct.artworkFit )
         ]
@@ -405,6 +407,7 @@ pageOverrideDecoder : Json.Decode.Decoder PageOverride
 pageOverrideDecoder =
     Json.Decode.succeed PageOverride
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "pageNumber" Json.Decode.int))
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "rotationDegrees" Json.Decode.int))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "finishedCutSize" (Json.Decode.nullable sizeInchesDecoder)))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "artworkFit" (Json.Decode.nullable artworkFitDecoder)))
 
@@ -437,7 +440,8 @@ planRectDecoder =
 
 
 type alias PagePlan =
-    { positionTravel : CropPosition
+    { rotationDegrees : Int
+    , positionTravel : CropPosition
     , pageNumber : Int
     , sourcePdfSize : SizeInches
     , previewBox : Maybe PdfBox
@@ -450,7 +454,8 @@ type alias PagePlan =
 pagePlanEncoder : PagePlan -> Json.Encode.Value
 pagePlanEncoder struct =
     Json.Encode.object
-        [ ( "positionTravel", cropPositionEncoder struct.positionTravel )
+        [ ( "rotationDegrees", Json.Encode.int struct.rotationDegrees )
+        , ( "positionTravel", cropPositionEncoder struct.positionTravel )
         , ( "pageNumber", Json.Encode.int struct.pageNumber )
         , ( "sourcePdfSize", sizeInchesEncoder struct.sourcePdfSize )
         , ( "previewBox", (Maybe.withDefault Json.Encode.null << Maybe.map pdfBoxEncoder) struct.previewBox )
@@ -463,6 +468,7 @@ pagePlanEncoder struct =
 pagePlanDecoder : Json.Decode.Decoder PagePlan
 pagePlanDecoder =
     Json.Decode.succeed PagePlan
+        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "rotationDegrees" Json.Decode.int))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "positionTravel" cropPositionDecoder))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "pageNumber" Json.Decode.int))
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "sourcePdfSize" sizeInchesDecoder))
@@ -1204,47 +1210,6 @@ recentGangUpJobInputDecoder =
         |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "layoutSummary" (Json.Decode.nullable recentGangUpLayoutSummaryDecoder)))
 
 
-type GangUpExportType
-    = GangUpExportTypeCleanPdf
-    | GangUpExportTypeLegacyDuploCutPlan
-
-
-gangUpExportTypeEncoder : GangUpExportType -> Json.Encode.Value
-gangUpExportTypeEncoder enum =
-    case enum of
-        GangUpExportTypeCleanPdf ->
-            Json.Encode.string "cleanPdf"
-
-        GangUpExportTypeLegacyDuploCutPlan ->
-            Json.Encode.string "duploCutPlan"
-
-
-gangUpExportTypeDecoder : Json.Decode.Decoder GangUpExportType
-gangUpExportTypeDecoder =
-    Json.Decode.oneOf
-        [ Json.Decode.string
-            |> Json.Decode.andThen
-                (\x ->
-                    case x of
-                        "cleanPdf" ->
-                            Json.Decode.succeed GangUpExportTypeCleanPdf
-
-                        unexpected ->
-                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
-                )
-        , Json.Decode.string
-            |> Json.Decode.andThen
-                (\x ->
-                    case x of
-                        "duploCutPlan" ->
-                            Json.Decode.succeed GangUpExportTypeLegacyDuploCutPlan
-
-                        unexpected ->
-                            Json.Decode.fail <| "Unexpected variant " ++ unexpected
-                )
-        ]
-
-
 type OutputPreference
     = OutputPreferenceCleanPdf
 
@@ -1270,105 +1235,6 @@ outputPreferenceDecoder =
                             Json.Decode.fail <| "Unexpected variant " ++ unexpected
                 )
         ]
-
-
-type alias GangUpExportRecord =
-    { id : String
-    , name : String
-    , sourceFilename : Maybe String
-    , exportedAt : String
-    , outputType : GangUpExportType
-    , outputFilename : String
-    , hasStoredFile : Bool
-    , request : LayoutRequest
-    , layoutSummary : Maybe RecentGangUpLayoutSummary
-    }
-
-
-gangUpExportRecordEncoder : GangUpExportRecord -> Json.Encode.Value
-gangUpExportRecordEncoder struct =
-    Json.Encode.object
-        [ ( "id", Json.Encode.string struct.id )
-        , ( "name", Json.Encode.string struct.name )
-        , ( "sourceFilename", (Maybe.withDefault Json.Encode.null << Maybe.map Json.Encode.string) struct.sourceFilename )
-        , ( "exportedAt", Json.Encode.string struct.exportedAt )
-        , ( "outputType", gangUpExportTypeEncoder struct.outputType )
-        , ( "outputFilename", Json.Encode.string struct.outputFilename )
-        , ( "hasStoredFile", Json.Encode.bool struct.hasStoredFile )
-        , ( "request", layoutRequestEncoder struct.request )
-        , ( "layoutSummary", (Maybe.withDefault Json.Encode.null << Maybe.map recentGangUpLayoutSummaryEncoder) struct.layoutSummary )
-        ]
-
-
-gangUpExportRecordDecoder : Json.Decode.Decoder GangUpExportRecord
-gangUpExportRecordDecoder =
-    Json.Decode.succeed GangUpExportRecord
-        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "id" Json.Decode.string))
-        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "name" Json.Decode.string))
-        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "sourceFilename" (Json.Decode.nullable Json.Decode.string)))
-        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "exportedAt" Json.Decode.string))
-        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "outputType" gangUpExportTypeDecoder))
-        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "outputFilename" Json.Decode.string))
-        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "hasStoredFile" Json.Decode.bool))
-        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "request" layoutRequestDecoder))
-        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "layoutSummary" (Json.Decode.nullable recentGangUpLayoutSummaryDecoder)))
-
-
-type alias GangUpExportRecordInput =
-    { name : Maybe String
-    , sourceFilename : Maybe String
-    , outputType : GangUpExportType
-    , outputFilename : String
-    , storedFile : Maybe GangUpStoredExportFileInput
-    , request : LayoutRequest
-    , layoutSummary : Maybe RecentGangUpLayoutSummary
-    }
-
-
-gangUpExportRecordInputEncoder : GangUpExportRecordInput -> Json.Encode.Value
-gangUpExportRecordInputEncoder struct =
-    Json.Encode.object
-        [ ( "name", (Maybe.withDefault Json.Encode.null << Maybe.map Json.Encode.string) struct.name )
-        , ( "sourceFilename", (Maybe.withDefault Json.Encode.null << Maybe.map Json.Encode.string) struct.sourceFilename )
-        , ( "outputType", gangUpExportTypeEncoder struct.outputType )
-        , ( "outputFilename", Json.Encode.string struct.outputFilename )
-        , ( "storedFile", (Maybe.withDefault Json.Encode.null << Maybe.map gangUpStoredExportFileInputEncoder) struct.storedFile )
-        , ( "request", layoutRequestEncoder struct.request )
-        , ( "layoutSummary", (Maybe.withDefault Json.Encode.null << Maybe.map recentGangUpLayoutSummaryEncoder) struct.layoutSummary )
-        ]
-
-
-gangUpExportRecordInputDecoder : Json.Decode.Decoder GangUpExportRecordInput
-gangUpExportRecordInputDecoder =
-    Json.Decode.succeed GangUpExportRecordInput
-        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "name" (Json.Decode.nullable Json.Decode.string)))
-        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "sourceFilename" (Json.Decode.nullable Json.Decode.string)))
-        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "outputType" gangUpExportTypeDecoder))
-        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "outputFilename" Json.Decode.string))
-        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "storedFile" (Json.Decode.nullable gangUpStoredExportFileInputDecoder)))
-        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "request" layoutRequestDecoder))
-        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "layoutSummary" (Json.Decode.nullable recentGangUpLayoutSummaryDecoder)))
-
-
-type alias GangUpStoredExportFileInput =
-    { contentType : String
-    , base64 : String
-    }
-
-
-gangUpStoredExportFileInputEncoder : GangUpStoredExportFileInput -> Json.Encode.Value
-gangUpStoredExportFileInputEncoder struct =
-    Json.Encode.object
-        [ ( "contentType", Json.Encode.string struct.contentType )
-        , ( "base64", Json.Encode.string struct.base64 )
-        ]
-
-
-gangUpStoredExportFileInputDecoder : Json.Decode.Decoder GangUpStoredExportFileInput
-gangUpStoredExportFileInputDecoder =
-    Json.Decode.succeed GangUpStoredExportFileInput
-        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "contentType" Json.Decode.string))
-        |> Json.Decode.andThen (\x -> Json.Decode.map x (Json.Decode.field "base64" Json.Decode.string))
 
 
 type alias RecentGangUpLayoutSummary =

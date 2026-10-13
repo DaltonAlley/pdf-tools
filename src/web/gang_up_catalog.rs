@@ -1,4 +1,4 @@
-//! Saved imposition preset, recent-job, and export-history HTTP handlers.
+//! Saved imposition preset and recent-job HTTP handlers.
 
 use std::sync::Arc;
 
@@ -11,7 +11,7 @@ use axum::{
 use crate::{
     error::{AppError, AppResult},
     imposition as gang_up_layout, imposition as gang_up_validation,
-    imposition::{GangUpExportRecordInput, LayoutRequest, PresetInput, RecentGangUpJobInput},
+    imposition::{LayoutRequest, PresetInput, RecentGangUpJobInput},
     AppState,
 };
 
@@ -99,61 +99,6 @@ pub(crate) async fn delete_recent_job(
     let operation_permit = state.admit_operation()?;
     validate_id(&id, "recent job")?;
     let store = state.recent_gang_up_store();
-    state
-        .run_cpu(operation_permit, move || store.delete(&id))
-        .await?;
-    Ok(StatusCode::NO_CONTENT.into_response())
-}
-
-pub(crate) async fn export_history(State(state): State<Arc<AppState>>) -> AppResult<Response> {
-    let operation_permit = state.admit_operation()?;
-    let store = state.gang_up_export_history_store();
-    let values = state
-        .run_cpu(operation_permit, move || store.list())
-        .await?;
-    Ok(no_store(Json(values).into_response()))
-}
-
-pub(crate) async fn create_export_history_record(
-    State(state): State<Arc<AppState>>,
-    Json(input): Json<GangUpExportRecordInput>,
-) -> AppResult<Response> {
-    let operation_permit = state.admit_operation()?;
-    validate_optional_name(input.name.as_deref(), "export name")?;
-    validate_name(&input.output_filename, "export filename")?;
-    let store = state.gang_up_export_history_store();
-    let value = state
-        .run_cpu(operation_permit, move || {
-            validate_saved_request(&input.request)?;
-            store.create(input)
-        })
-        .await?;
-    Ok(no_store((StatusCode::CREATED, Json(value)).into_response()))
-}
-
-pub(crate) async fn download_export_history_record(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
-) -> AppResult<Response> {
-    let operation_permit = state.admit_operation()?;
-    validate_id(&id, "export history")?;
-    let store = state.gang_up_export_history_store();
-    let max_download_bytes = state.max_download_bytes();
-    let file = state
-        .run_cpu(operation_permit, move || {
-            store.download(&id, max_download_bytes)
-        })
-        .await?;
-    Ok(file.into_response())
-}
-
-pub(crate) async fn delete_export_history_record(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
-) -> AppResult<Response> {
-    let operation_permit = state.admit_operation()?;
-    validate_id(&id, "export history")?;
-    let store = state.gang_up_export_history_store();
     state
         .run_cpu(operation_permit, move || store.delete(&id))
         .await?;

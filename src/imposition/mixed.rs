@@ -62,6 +62,11 @@ fn prepare(mut request: LayoutRequest) -> AppResult<(LayoutRequest, Vec<PagePlan
     }
     let mut seen = std::collections::HashSet::new();
     for entry in &request.page_overrides {
+        if ![0, 90, 180, 270].contains(&entry.rotation_degrees) {
+            return Err(AppError::bad_request(
+                "artwork rotation must be 0, 90, 180, or 270 degrees",
+            ));
+        }
         if entry.page_number == 0
             || entry.page_number > request.source_pages.len()
             || !seen.insert(entry.page_number)
@@ -107,6 +112,16 @@ fn prepare(mut request: LayoutRequest) -> AppResult<(LayoutRequest, Vec<PagePlan
         {
             return Err(AppError::bad_request("image physical size is assumed at 300 DPI; choose a common or explicit finished size"));
         }
+        let rotation = override_.map_or(0, |entry| entry.rotation_degrees);
+        let source_size = page.source_pdf_size;
+        let source = if rotation == 90 || rotation == 270 {
+            SizeInches {
+                width: source_size.height,
+                height: source_size.width,
+            }
+        } else {
+            source_size
+        };
         let basis = page.source_trim_box.unwrap_or(PdfBox {
             left: 0.0,
             bottom: 0.0,
@@ -115,6 +130,37 @@ fn prepare(mut request: LayoutRequest) -> AppResult<(LayoutRequest, Vec<PagePlan
             width: page.source_pdf_size.width,
             height: page.source_pdf_size.height,
         });
+        // Rotate the source's cut metadata with its artwork before fitting.
+        // Coordinates here are PDF bottom-left inches; rotation is clockwise.
+        let (left, bottom, width, height) = match rotation {
+            90 => (
+                basis.bottom,
+                source_size.width - basis.right,
+                basis.height,
+                basis.width,
+            ),
+            180 => (
+                source_size.width - basis.right,
+                source_size.height - basis.top,
+                basis.width,
+                basis.height,
+            ),
+            270 => (
+                source_size.height - basis.top,
+                basis.left,
+                basis.height,
+                basis.width,
+            ),
+            _ => (basis.left, basis.bottom, basis.width, basis.height),
+        };
+        let basis = PdfBox {
+            left,
+            bottom,
+            right: left + width,
+            top: bottom + height,
+            width,
+            height,
+        };
         let finished = override_
             .and_then(|entry| entry.finished_cut_size)
             .unwrap_or_else(|| {
@@ -174,8 +220,8 @@ fn prepare(mut request: LayoutRequest) -> AppResult<(LayoutRequest, Vec<PagePlan
             let supplied = [
                 basis.left * scale_x,
                 basis.bottom * scale_y,
-                (page.source_pdf_size.width - basis.right) * scale_x,
-                (page.source_pdf_size.height - basis.top) * scale_y,
+                (source.width - basis.right) * scale_x,
+                (source.height - basis.top) * scale_y,
             ]
             .into_iter()
             .fold(f64::INFINITY, f64::min)
@@ -191,11 +237,12 @@ fn prepare(mut request: LayoutRequest) -> AppResult<(LayoutRequest, Vec<PagePlan
             x: -added + (finished.width + 2.0 * added - basis.width * scale_x) * fit.position.x
                 - basis.left * scale_x,
             y: -added + (finished.height + 2.0 * added - basis.height * scale_y) * fit.position.y
-                - (page.source_pdf_size.height - basis.top) * scale_y,
-            width: page.source_pdf_size.width * scale_x,
-            height: page.source_pdf_size.height * scale_y,
+                - (source.height - basis.top) * scale_y,
+            width: source.width * scale_x,
+            height: source.height * scale_y,
         };
         plans.push(PagePlan {
+            rotation_degrees: rotation,
             position_travel: CropPosition {
                 x: finished.width + 2.0 * added - basis.width * scale_x,
                 y: finished.height + 2.0 * added - basis.height * scale_y,

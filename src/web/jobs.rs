@@ -248,22 +248,24 @@ pub(crate) async fn create(
                 )
                 .await
             }
-            JobAction::GangUpExport => gang_up::export_pdf_form(
-                worker_state.clone(),
-                form,
-                _operation_permit.clone(),
-                Some(progress),
-            )
-            .await
-            .map(|download| download.file),
-            JobAction::GangUpExportSource => gang_up::export_pdf_source_form(
-                worker_state.clone(),
-                form,
-                _operation_permit.clone(),
-                Some(progress),
-            )
-            .await
-            .map(|download| download.file),
+            JobAction::GangUpExport => {
+                gang_up::export_pdf_form(
+                    worker_state.clone(),
+                    form,
+                    _operation_permit.clone(),
+                    Some(progress),
+                )
+                .await
+            }
+            JobAction::GangUpExportSource => {
+                gang_up::export_pdf_source_form(
+                    worker_state.clone(),
+                    form,
+                    _operation_permit.clone(),
+                    Some(progress),
+                )
+                .await
+            }
         };
 
         if cancellation.is_cancelled() {

@@ -30,6 +30,88 @@ fn layout(r: LayoutRequest) -> LayoutResult {
 }
 
 #[test]
+fn rotating_one_landscape_page_fits_a_shared_portrait_cut() {
+    let mut r = request();
+    r.source_pages = vec![page(8.5, 11.0), page(11.0, 8.5)];
+    r.source_page_count = Some(2);
+    r.quantity_requested = 2;
+    r.orientation_preference = OrientationPreference::Auto;
+    r.artwork_fit.as_mut().unwrap().mode = ArtworkFitMode::Contain;
+    let original = layout(r.clone());
+    for rotation in [90, 270] {
+        r.page_overrides = vec![PageOverride {
+            page_number: 2,
+            rotation_degrees: rotation,
+            finished_cut_size: None,
+            artwork_fit: None,
+        }];
+        let rotated = layout(r.clone());
+        assert_eq!(rotated.pieces_per_sheet, 2);
+        assert_eq!(rotated.page_plans[0], original.page_plans[0]);
+        assert_eq!(rotated.placements, original.placements);
+        let plan = &rotated.page_plans[1];
+        assert_eq!(plan.source_pdf_size, r.source_pages[1].source_pdf_size);
+        assert_eq!(plan.finished_cut_size, r.finished_cut_size);
+        close(plan.artwork.width, 8.5);
+        close(plan.artwork.height, 11.0);
+        close(plan.artwork.x, 0.0);
+        close(plan.artwork.y, 0.0);
+    }
+}
+
+#[test]
+fn artwork_rotation_preserves_asymmetric_trim_and_validates_angles() {
+    let mut r = request();
+    r.source_pdf_size = SizeInches {
+        width: 6.0,
+        height: 4.0,
+    };
+    r.source_trim_box = Some(PdfBox {
+        left: 0.25,
+        bottom: 0.5,
+        right: 5.25,
+        top: 3.5,
+        width: 5.0,
+        height: 3.0,
+    });
+    r.artwork_fit.as_mut().unwrap().mode = ArtworkFitMode::Contain;
+    for (rotation, x, y) in [
+        (0, -0.25, -0.5),
+        (90, -0.5, -0.25),
+        (180, -0.75, -0.5),
+        (270, -0.5, -0.75),
+    ] {
+        r.finished_cut_size = if rotation == 90 || rotation == 270 {
+            SizeInches {
+                width: 3.0,
+                height: 5.0,
+            }
+        } else {
+            SizeInches {
+                width: 5.0,
+                height: 3.0,
+            }
+        };
+        r.page_overrides = vec![PageOverride {
+            page_number: 1,
+            rotation_degrees: rotation,
+            finished_cut_size: None,
+            artwork_fit: None,
+        }];
+        let result = layout(r.clone());
+        close(result.page_plans[0].artwork.x, x);
+        close(result.page_plans[0].artwork.y, y);
+        close(result.page_plans[0].bleed_amount, 0.25);
+    }
+    for angle in [1, 45, 360, u16::MAX] {
+        r.page_overrides[0].rotation_degrees = angle;
+        assert!(super::super::layout::generate_layout(r.clone()).is_err());
+    }
+    let legacy: PageOverride = serde_json::from_value(serde_json::json!({"pageNumber":1})).unwrap();
+    assert_eq!(legacy.rotation_degrees, 0);
+}
+
+#[test]
 fn letter_bleed_two_up_matches_reference_cut_spacing_in_both_orientations() {
     for landscape in [false, true] {
         let (width, height) = if landscape { (11.0, 8.5) } else { (8.5, 11.0) };
@@ -203,6 +285,7 @@ fn per_page_overrides_do_not_mutate_sources_or_other_pages() {
     r.source_pages = vec![page(4.0, 6.0), page(6.0, 4.0)];
     r.source_page_count = Some(2);
     r.page_overrides = vec![PageOverride {
+        rotation_degrees: 0,
         page_number: 2,
         finished_cut_size: Some(SizeInches {
             width: 3.0,
@@ -246,6 +329,7 @@ fn crop_positions_and_overrides_are_bounded() {
     for number in [0, 2, usize::MAX] {
         let mut r = request();
         r.page_overrides.push(PageOverride {
+            rotation_degrees: 0,
             page_number: number,
             finished_cut_size: None,
             artwork_fit: None,
@@ -278,6 +362,7 @@ fn duplex_requires_even_pages_and_matching_individual_cuts() {
         .to_string()
         .contains("front and back finished sizes"));
     r.page_overrides.push(PageOverride {
+        rotation_degrees: 0,
         page_number: 2,
         finished_cut_size: Some(SizeInches {
             width: 4.0,
@@ -300,6 +385,7 @@ fn unknown_image_physical_size_requires_explicit_finished_size() {
         .to_string()
         .contains("300 DPI"));
     r.page_overrides.push(PageOverride {
+        rotation_degrees: 0,
         page_number: 1,
         finished_cut_size: Some(SizeInches {
             width: 4.0,
@@ -415,6 +501,7 @@ fn stretch_page_override_and_request_roundtrip_preserve_other_fit_modes() {
     r.source_pages = vec![page(20.0, 2.0), page(2.0, 20.0)];
     r.source_page_count = Some(2);
     r.page_overrides.push(PageOverride {
+        rotation_degrees: 0,
         page_number: 2,
         finished_cut_size: Some(SizeInches {
             width: 3.0,

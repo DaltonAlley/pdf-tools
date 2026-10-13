@@ -101,6 +101,8 @@ pub(crate) struct SourcePage {
 pub(crate) struct PageOverride {
     pub page_number: usize,
     #[serde(default)]
+    pub rotation_degrees: u16,
+    #[serde(default)]
     pub finished_cut_size: Option<SizeInches>,
     #[serde(default)]
     pub artwork_fit: Option<ArtworkFit>,
@@ -118,6 +120,7 @@ pub(crate) struct PlanRect {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct PagePlan {
+    pub rotation_degrees: u16,
     pub position_travel: CropPosition,
     pub page_number: usize,
     pub source_pdf_size: SizeInches,
@@ -352,54 +355,11 @@ pub(crate) struct RecentGangUpJobInput {
     pub layout_summary: Option<RecentGangUpLayoutSummary>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) enum GangUpExportType {
-    CleanPdf,
-    #[serde(rename = "duploCutPlan")]
-    LegacyDuploCutPlan,
-}
-
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum OutputPreference {
     #[default]
     CleanPdf,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct GangUpExportRecord {
-    pub id: String,
-    pub name: String,
-    pub source_filename: Option<String>,
-    pub exported_at: String,
-    pub output_type: GangUpExportType,
-    pub output_filename: String,
-    #[serde(default)]
-    pub has_stored_file: bool,
-    pub request: LayoutRequest,
-    pub layout_summary: Option<RecentGangUpLayoutSummary>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct GangUpExportRecordInput {
-    pub name: Option<String>,
-    pub source_filename: Option<String>,
-    pub output_type: GangUpExportType,
-    pub output_filename: String,
-    #[serde(default)]
-    pub stored_file: Option<GangUpStoredExportFileInput>,
-    pub request: LayoutRequest,
-    pub layout_summary: Option<RecentGangUpLayoutSummary>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct GangUpStoredExportFileInput {
-    pub content_type: String,
-    pub base64: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

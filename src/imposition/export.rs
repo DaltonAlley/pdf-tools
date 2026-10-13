@@ -219,8 +219,8 @@ fn export_loaded_document(
 
     Ok(ExportArtifact {
         bytes,
+        #[cfg(test)]
         layout,
-        canonical_request: request,
     })
 }
 
@@ -300,8 +300,8 @@ fn validate_resolved_source_bleed(
 
 pub(crate) struct ExportArtifact {
     pub(crate) bytes: Vec<u8>,
+    #[cfg(test)]
     pub(crate) layout: LayoutResult,
-    pub(crate) canonical_request: LayoutRequest,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -594,7 +594,12 @@ fn add_shared_resource_sheet(
         let matrix = placement_matrix(
             resolved,
             form.size,
-            layout.rotation_degrees,
+            (layout.rotation_degrees
+                + layout
+                    .page_plans
+                    .get(source_index)
+                    .map_or(0, |plan| plan.rotation_degrees))
+                % 360,
             rotate_back_180,
         );
         operations.push(Operation::new("q", Vec::new()));
@@ -872,7 +877,8 @@ fn placement_matrix(
     rotation_degrees: u16,
     rotate_180: bool,
 ) -> [f64; 6] {
-    if rotation_degrees == 90 && rotate_180 {
+    let rotation = (rotation_degrees + if rotate_180 { 180 } else { 0 }) % 360;
+    if rotation == 270 {
         let scale_x = placement.height / inches_to_points(source_size.width);
         let scale_y = placement.width / inches_to_points(source_size.height);
         [
@@ -883,7 +889,7 @@ fn placement_matrix(
             placement.x + placement.width,
             placement.y,
         ]
-    } else if rotation_degrees == 90 {
+    } else if rotation == 90 {
         let scale_x = placement.height / inches_to_points(source_size.width);
         let scale_y = placement.width / inches_to_points(source_size.height);
         [
@@ -894,7 +900,7 @@ fn placement_matrix(
             placement.x,
             placement.y + placement.height,
         ]
-    } else if rotate_180 {
+    } else if rotation == 180 {
         [
             -placement.width / inches_to_points(source_size.width),
             0.0,
@@ -1016,36 +1022,37 @@ mod tests {
 
     #[test]
     fn stretch_export_matches_preview_plan_with_rotation_bleed_and_duplex() {
-        for orientation in ["upright", "quarterTurn"] {
-            for (bleed, source_bleed) in [
-                ("useAsIs", None),
-                ("scaleToBleed", None),
-                ("fitInside", None),
-                ("useAsIs", Some(0.125)),
-            ] {
-                for rotate_back in [false, true] {
-                    let mut source = LoDocument::with_version("1.7");
-                    let pages_id = source.new_object_id();
-                    let mut page_ids = Vec::new();
-                    for (width, height) in [(20.0, 2.0), (2.0, 20.0)] {
-                        let content = source.add_object(Stream::new(
-                            Dictionary::new(),
-                            b"1 0 0 rg 0 0 72 72 re f".to_vec(),
-                        ));
-                        page_ids.push(source.add_object(dictionary! {
+        for source_rotation in [0, 90, 180, 270] {
+            for orientation in ["upright", "quarterTurn"] {
+                for (bleed, source_bleed) in [
+                    ("useAsIs", None),
+                    ("scaleToBleed", None),
+                    ("fitInside", None),
+                    ("useAsIs", Some(0.125)),
+                ] {
+                    for rotate_back in [false, true] {
+                        let mut source = LoDocument::with_version("1.7");
+                        let pages_id = source.new_object_id();
+                        let mut page_ids = Vec::new();
+                        for (width, height) in [(20.0, 2.0), (2.0, 20.0)] {
+                            let content = source.add_object(Stream::new(
+                                Dictionary::new(),
+                                b"1 0 0 rg 0 0 72 72 re f".to_vec(),
+                            ));
+                            page_ids.push(source.add_object(dictionary! {
                             "Type" => "Page", "Parent" => pages_id,
                             "MediaBox" => vec![0.into(), 0.into(), (width * 72.0).into(), (height * 72.0).into()],
                             "Resources" => Dictionary::new(), "Contents" => content,
                         }));
-                    }
-                    source.objects.insert(pages_id, Object::Dictionary(dictionary! {
+                        }
+                        source.objects.insert(pages_id, Object::Dictionary(dictionary! {
                         "Type" => "Pages", "Count" => 2,
                         "Kids" => page_ids.into_iter().map(Object::Reference).collect::<Vec<_>>(),
                     }));
-                    let catalog =
-                        source.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
-                    source.trailer.set("Root", catalog);
-                    let request: LayoutRequest = serde_json::from_value(serde_json::json!({
+                        let catalog = source
+                            .add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+                        source.trailer.set("Root", catalog);
+                        let request: LayoutRequest = serde_json::from_value(serde_json::json!({
                         "sourcePdfSize":{"width":20.0,"height":2.0}, "sourcePageCount":2,
                         "finishedCutSize":{"width":8.5,"height":11.0},
                         "parentSheetSize":{"width":12.0,"height":18.0},
@@ -1053,66 +1060,106 @@ mod tests {
                         "sides":"double", "duplex":{"flipEdge":"longEdge","rotateBack180":rotate_back,"backAlignment":""},
                         "layoutMode":"auto","bleedOption":bleed,"createdBleedAmount":0.125,
                         "sourceBleedOverride":source_bleed,
+                        "pageOverrides":[{"pageNumber":1,"rotationDegrees":source_rotation},{"pageNumber":2,"rotationDegrees":270-source_rotation}],
                         "gutter":{"horizontal":0.0,"vertical":0.0},"manual":null,
                         "artworkFit":{"mode":"stretch","position":{"x":0.0,"y":1.0}}
                     })).unwrap();
-                    let mut preview_request = request.clone();
-                    resolve_request_source(&source, &mut preview_request).unwrap();
-                    let preview = gang_up_layout::generate_layout(preview_request).unwrap();
-                    if source_bleed.is_some() {
-                        let plan = &preview.page_plans[0];
-                        assert_close(plan.artwork.width, 20.0 * 8.5 / 19.75);
-                        assert_close(plan.artwork.height, 2.0 * 11.0 / 1.75);
-                        assert_close(plan.bleed_amount, 0.125 * 8.5 / 19.75);
-                        assert_close(plan.position_travel.x, 0.0);
-                        assert_close(plan.position_travel.y, 0.0);
+                        let mut preview_request = request.clone();
+                        resolve_request_source(&source, &mut preview_request).unwrap();
+                        let preview = gang_up_layout::generate_layout(preview_request).unwrap();
+                        if source_bleed.is_some() && source_rotation == 0 {
+                            let plan = &preview.page_plans[0];
+                            assert_close(plan.artwork.width, 20.0 * 8.5 / 19.75);
+                            assert_close(plan.artwork.height, 2.0 * 11.0 / 1.75);
+                            assert_close(plan.bleed_amount, 0.125 * 8.5 / 19.75);
+                            assert_close(plan.position_travel.x, 0.0);
+                            assert_close(plan.position_travel.y, 0.0);
+                        }
+                        let artifact = export_loaded_document(&mut source, request, None).unwrap();
+                        assert_eq!(artifact.layout.page_plans, preview.page_plans);
+                        let output = LoDocument::load_mem(&artifact.bytes).unwrap();
+                        assert_eq!(output.get_pages().len(), 2);
+                        for (index, id) in output.get_pages().into_values().enumerate() {
+                            let side = if index == 0 {
+                                SheetSide::Front
+                            } else {
+                                SheetSide::Back
+                            };
+                            let plan = &preview.page_plans[index];
+                            let (art, clip) =
+                                resolve_page_plan(&preview, plan, &preview.placements[0], side);
+                            let matrix = placement_matrix(
+                                art,
+                                plan.source_pdf_size,
+                                (preview.rotation_degrees + plan.rotation_degrees) % 360,
+                                index == 1 && rotate_back,
+                            );
+                            let operations = Content::decode(&output.get_page_content(id))
+                                .unwrap()
+                                .operations;
+                            let exported_matrix =
+                                operations.iter().find(|op| op.operator == "cm").unwrap();
+                            for (value, expected) in exported_matrix.operands.iter().zip(matrix) {
+                                assert_close(f64::from(value.as_float().unwrap()), expected);
+                            }
+                            let exported_clip =
+                                operations.iter().find(|op| op.operator == "re").unwrap();
+                            for (value, expected) in exported_clip.operands.iter().zip([
+                                clip.x,
+                                clip.y,
+                                clip.width,
+                                clip.height,
+                            ]) {
+                                assert_close(f64::from(value.as_float().unwrap()), expected);
+                            }
+                            // Independently check both source axes map to the planned dimensions.
+                            let origin = transformed_point(matrix, 0.0, 0.0);
+                            let corner = transformed_point(
+                                matrix,
+                                plan.source_pdf_size.width * 72.0,
+                                plan.source_pdf_size.height * 72.0,
+                            );
+                            assert_close((corner.0 - origin.0).abs(), art.width);
+                            assert_close((corner.1 - origin.1).abs(), art.height);
+                        }
                     }
-                    let artifact = export_loaded_document(&mut source, request, None).unwrap();
-                    assert_eq!(artifact.layout.page_plans, preview.page_plans);
-                    let output = LoDocument::load_mem(&artifact.bytes).unwrap();
-                    assert_eq!(output.get_pages().len(), 2);
-                    for (index, id) in output.get_pages().into_values().enumerate() {
-                        let side = if index == 0 {
-                            SheetSide::Front
-                        } else {
-                            SheetSide::Back
-                        };
-                        let plan = &preview.page_plans[index];
-                        let (art, clip) =
-                            resolve_page_plan(&preview, plan, &preview.placements[0], side);
-                        let matrix = placement_matrix(
-                            art,
-                            plan.source_pdf_size,
-                            preview.rotation_degrees,
-                            index == 1 && rotate_back,
-                        );
-                        let operations = Content::decode(&output.get_page_content(id))
-                            .unwrap()
-                            .operations;
-                        let exported_matrix =
-                            operations.iter().find(|op| op.operator == "cm").unwrap();
-                        for (value, expected) in exported_matrix.operands.iter().zip(matrix) {
-                            assert_close(f64::from(value.as_float().unwrap()), expected);
-                        }
-                        let exported_clip =
-                            operations.iter().find(|op| op.operator == "re").unwrap();
-                        for (value, expected) in exported_clip.operands.iter().zip([
-                            clip.x,
-                            clip.y,
-                            clip.width,
-                            clip.height,
-                        ]) {
-                            assert_close(f64::from(value.as_float().unwrap()), expected);
-                        }
-                        // Independently check both source axes map to the planned dimensions.
-                        let origin = transformed_point(matrix, 0.0, 0.0);
-                        let corner = transformed_point(
-                            matrix,
-                            plan.source_pdf_size.width * 72.0,
-                            plan.source_pdf_size.height * 72.0,
-                        );
-                        assert_close((corner.0 - origin.0).abs(), art.width);
-                        assert_close((corner.1 - origin.1).abs(), art.height);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn all_artwork_rotations_map_source_corners_clockwise_with_duplex() {
+        let placement = ResolvedPlacement {
+            x: 10.0,
+            y: 20.0,
+            width: 144.0,
+            height: 216.0,
+        };
+        let source = SizeInches {
+            width: 5.0,
+            height: 3.0,
+        };
+        let corners = [
+            [(10.0, 20.0), (154.0, 20.0), (10.0, 236.0)],
+            [(10.0, 236.0), (10.0, 20.0), (154.0, 236.0)],
+            [(154.0, 236.0), (10.0, 236.0), (154.0, 20.0)],
+            [(154.0, 20.0), (154.0, 236.0), (10.0, 20.0)],
+        ];
+        for artwork in [0, 90, 180, 270] {
+            for global in [0, 90] {
+                for back in [false, true] {
+                    let rotation = (artwork + global) % 360;
+                    let expected =
+                        corners[(((rotation + if back { 180 } else { 0 }) % 360) / 90) as usize];
+                    let matrix = placement_matrix(placement, source, rotation, back);
+                    for ((x, y), (ex, ey)) in [(0.0, 0.0), (360.0, 0.0), (0.0, 216.0)]
+                        .into_iter()
+                        .zip(expected)
+                    {
+                        let actual = transformed_point(matrix, x, y);
+                        assert_close(actual.0, ex);
+                        assert_close(actual.1, ey);
                     }
                 }
             }

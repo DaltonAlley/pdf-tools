@@ -36,12 +36,13 @@ with sync_playwright() as pw:
         image=Image.open(download.value.path())
         assert image.format=='PNG' and image.size==(288,288)
         expect(page.get_by_role('button',name='Cancel',exact=True)).to_have_count(0)
-        page.get_by_role('button',name='Impose artwork',exact=True).click()
+        page.get_by_role('combobox',name='Tool',exact=True).click()
+        page.get_by_role('option',name='Impose artwork',exact=True).click()
         page.locator('#finished-width').wait_for(timeout=60000)
         page.locator('#finished-width').fill('3')
         page.locator('#finished-height').fill('2')
         page.locator('.sheet-svg image').first.wait_for(timeout=60000)
-        for step in ['Quantity & sheet','Arrangement','Bleed']:
+        for step in ['Sheet','Bleed']:
             page.get_by_role('button',name='Continue',exact=True).click()
             expect(page.locator('.setup-stepper button[aria-selected=true]')).to_have_text(step)
         with page.expect_download(timeout=60000) as download:

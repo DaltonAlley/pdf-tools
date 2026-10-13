@@ -46,9 +46,6 @@ codec name raw =
         "DuplexFlipEdge" ->
             roundTrip A.duplexFlipEdgeDecoder A.duplexFlipEdgeEncoder raw
 
-        "GangUpExportType" ->
-            roundTrip A.gangUpExportTypeDecoder A.gangUpExportTypeEncoder raw
-
         "OutputPreference" ->
             roundTrip A.outputPreferenceDecoder A.outputPreferenceEncoder raw
 
@@ -75,9 +72,6 @@ codec name raw =
 
         "RecentGangUpJob" ->
             roundTrip A.recentGangUpJobDecoder A.recentGangUpJobEncoder raw
-
-        "GangUpExportRecord" ->
-            roundTrip A.gangUpExportRecordDecoder A.gangUpExportRecordEncoder raw
 
         "PdfAnalysis" ->
             roundTrip A.pdfAnalysisDecoder A.pdfAnalysisEncoder raw
