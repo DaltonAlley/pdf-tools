@@ -149,6 +149,11 @@ class Suite:
         expect(self.page.locator('[data-layout-state=pending]')).to_have_count(0, timeout=60000)
         expect(self.page.locator('.preview-cache-status').filter(has_text='Updating preview')).to_have_count(0, timeout=60000)
 
+    def close_quantities(self):
+        self.button('Done').click()
+        expect(self.page.locator('#workspace-dialog')).to_have_count(0)
+        self.idle()
+
     def download(self, name, output):
         self.idle()
         with self.page.expect_download(timeout=60000) as download:
@@ -937,7 +942,7 @@ class Suite:
                 self.step('Sheet')
                 self.button('Repeat pages').click()
                 expect(self.page.locator('#workspace-dialog')).to_be_visible()
-                self.button('Done').click()
+                self.close_quantities()
                 opener = self.button('Edit copy quantities')
                 for printing, quantities in [('single', [3] * 6), ('double', [3] * 3)]:
                     self.dropdown('Printing', printing)
@@ -1009,7 +1014,7 @@ class Suite:
         self.impose(stripe)
         self.step('Sheet')
         self.button('Repeat pages').click()
-        self.button('Done').click()
+        self.close_quantities()
         self.page.get_by_label('Copies', exact=True).fill('61')
         self.idle()
         toolbar = self.page.locator('.elm-toolbar')
@@ -1107,7 +1112,7 @@ class Suite:
         self.impose(stripe)
         self.step('Sheet')
         self.button('Repeat pages').click()
-        self.button('Done').click()
+        self.close_quantities()
         self.page.get_by_label('Copies', exact=True).fill('61')
         self.idle()
         menu = self.page.locator('.elm-presets-menu')
@@ -1151,7 +1156,7 @@ class Suite:
         self.impose(stripe)
         self.step('Sheet')
         self.button('Repeat pages').click()
-        self.button('Done').click()
+        self.close_quantities()
         self.page.get_by_label('Copies', exact=True).fill('61')
         for preset_id, expected, load_step in presets:
             self.step(load_step)
@@ -1238,7 +1243,7 @@ class Suite:
         assert self.layouts[-1]['impressionQuantities']==[2]*6
         self.button('Edit copy quantities').click()
         self.page.get_by_label('Page 2 copies',exact=True).fill('0')
-        self.button('Done').click()
+        self.close_quantities()
         self.idle()
         assert self.layouts[-1]['impressionQuantities']==[2,0,2,2,2,2]
         self.dropdown('Printing', 'double')
@@ -1341,7 +1346,7 @@ class Suite:
         self.page.locator('#finished-height').fill('11')
         self.step('Sheet')
         self.button('Repeat pages').click()
-        self.button('Done').click()
+        self.close_quantities()
         self.page.get_by_label('Copies',exact=True).fill('2')
         self.idle()
         first = self.page.locator('#sheet-item-0')
