@@ -34,7 +34,6 @@ Thumbs.db
 /.codex/
 /frontend/node_modules/
 /frontend/elm-stuff/
-/frontend/browser/_build/
 /test-results/
 
 # Python acceptance scripts

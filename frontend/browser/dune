@@ -1,5 +1,0 @@
-(executable
- (name bootstrap)
- (modes js)
- (libraries elm-browser js_of_ocaml)
- (js_of_ocaml (flags (:standard --opt 3))))

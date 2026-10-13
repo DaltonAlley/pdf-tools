@@ -1816,7 +1816,7 @@ class Suite:
         self.page.unroute('**/elm.js')
         expect(self.button('Browse files')).to_be_visible()
         # Loaded code can still lack Elm.Main or the required bridge ports.
-        # Both library failures must reach the same Retry interface.
+        # Both bootstrap failures must reach the same Retry interface.
         for body in ['window.Elm = {};', 'window.Elm = {Main: {init: () => ({ports: {}})}};']:
             self.page.route('**/elm.js', lambda route: route.fulfill(status=200, content_type='text/javascript', body=body))
             self.page.goto(args.url)
@@ -1824,7 +1824,7 @@ class Suite:
             self.page.unroute('**/elm.js')
             self.page.locator('#startup-retry').click()
             expect(self.button('Browse files')).to_be_visible()
-        self.checks.append('startup: CSS, Elm, OCaml bootstrap, and resource bridge failure + retry; missing Elm module/ports recovery')
+        self.checks.append('startup: CSS, Elm, JavaScript bootstrap, and resource bridge failure + retry; missing Elm module/ports recovery')
 
     def finish(self):
         assert not self.errors, self.errors

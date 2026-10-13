@@ -4,7 +4,6 @@ import Api.Generated as A
 import Browser
 import Da.Reorderable as Reorderable
 import Dict
-import ElmBrowser
 import File
 import File.Download
 import File.Select
@@ -19,6 +18,16 @@ import Task
 import Time
 import Validation as V
 import View
+
+
+themeStorageFailure : D.Decoder Bool
+themeStorageFailure =
+    D.map4
+        (\version id kind _ -> version == 1 && id == "theme" && kind == "error")
+        (D.field "version" D.int)
+        (D.field "id" D.string)
+        (D.field "kind" D.string)
+        (D.field "message" D.string)
 
 
 port resources : E.Value -> Cmd msg
@@ -1145,8 +1154,8 @@ updateInternal msg m =
                         preview { m | layout = Just layout, layoutReady = True, error = "", sheet = min m.sheet (max 0 (layout.sheetsRequired - 1)), retryKind = "" }
 
         SharedBrowserResponse value ->
-            case ElmBrowser.decode value of
-                Ok (ElmBrowser.Failed "theme" _) ->
+            case D.decodeValue themeStorageFailure value of
+                Ok True ->
                     ( { m | notice = "Theme changed for this tab. Your browser could not save the preference." }, Cmd.none )
 
                 _ ->

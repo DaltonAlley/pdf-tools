@@ -1,11 +1,10 @@
 # Elm frontend
 
-Initialize dependencies with `git submodule update --init --recursive` and enter
-`nix develop .#pdf-app` from the repository root. In this directory,
-`npm ci && npm run build` compiles Elm and the OCaml bootstrap with optimization,
-hashes the complete Elm/bootstrap/bridge/DA-adapter/CSS bundle, writes `dist/app.html`, and
-generates gzip sidecars. The development shell supplies OCaml, Dune, and
-`js_of_ocaml`; the Docker build supplies them through opam.
+Enter `nix develop .#pdf-app` from the repository root. In this directory,
+`npm ci && npm run build` compiles Elm with optimization, checks the JavaScript
+bootstrap, hashes the complete Elm/bootstrap/bridge/DA-adapter/CSS bundle,
+writes `dist/app.html`, and generates gzip sidecars. Node and the pinned npm
+dependencies supply the frontend build tools.
 Axum serves everything from that distribution; API URLs are relative. Elm's file
 picker, multipart uploads, JSON HTTP calls and polling are native Elm packages.
 The interface works on insecure HTTP origins. JavaScript uses no secure-context
@@ -49,19 +48,16 @@ preview-box geometry. Elm renders those plans in SVG. The old preview snapshot
 stays displayed until its replacement completes. Invalid inputs retain their
 exact drafts and block export; they never overwrite valid numeric values.
 
-The commit-pinned `browser/elm-browser` submodule is the same OCaml library used
-by Squire. `browser/bootstrap.ml` calls `Elm_browser.start` to mount Elm and attach
-its versioned bridge. The HTML loader waits for styles, Elm, and the compiled
-bootstrap, then supplies the PDF resource adapter through `on_ready`. Startup
-errors still show Retry, including a missing Elm module or missing bridge ports.
-Rust/Axum remains the HTTP server; the OCaml code runs in the browser.
+`browser/bootstrap.js` mounts Elm and validates its required ports. The HTML
+loader waits for styles, Elm, and this JavaScript bootstrap, then attaches the
+PDF resource adapter before reporting that startup is ready. Startup errors
+show Retry, including a missing Elm module or missing bridge ports.
 
-`browserRequest` and `browserResponse` connect Elm to shared browser features.
-Only Storage is enabled. Theme writes retain the existing raw `pdf-tools-theme`
-value, and storage failures leave the selected theme active for the current tab.
-The pinned Elm companion decodes versioned responses. Update the submodule pin
-deliberately; do not copy or edit its implementation in this application.
-Clones and CI runners need network access to the submodule's Forgejo host.
+`browserRequest` and `browserResponse` carry versioned theme-storage commands
+and responses. Theme writes retain the existing raw `pdf-tools-theme` value.
+Storage failures are reported to Elm and leave the selected theme active for
+the current tab. The app decodes its own responses and requires no external
+bootstrap library or Git submodule.
 
 `bridge.js` owns PDF-specific browser resources through two documented ports:
 
@@ -85,7 +81,7 @@ File objects for Elm's decoder. It contains no PDF processing or layout solver.
 
 ## Verification
 
-`npm test` covers validation, state transitions and wire contracts. Python
+`npm test` covers bootstrap startup/storage, validation, state transitions and wire contracts. Python
 Playwright scripts under `scripts/` exercise the real backend in Chromium and
 Firefox, inspecting output PDFs/images with PyMuPDF/Pillow. They also test
 controlled failure recovery, insecure HTTP, preview batches, keyboard focus and
@@ -102,7 +98,7 @@ Common buttons, fields, theme controls, and dialogs come from the pinned
 `da-components` 0.2.3 source archive. Both apps consume the same bundle. Domain
 state and workflow layout stay in Elm; shared styles own the controls' appearance.
 Legacy layout CSS lives in the lower `app` cascade layer. The DA browser adapter
-owns dialog focus and dismissal, alongside the app's elm-browser bootstrap.
+owns dialog focus and dismissal, alongside the app's JavaScript bootstrap.
 
 `npm ci` installs `vendor/da-components-0.2.3.tgz`. The build includes its Elm
 sources, combines its stylesheet with app layout CSS, and versions/gzips its

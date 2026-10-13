@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-process.chdir(path.dirname(new URL(import.meta.url).pathname));
+process.chdir(path.dirname(fileURLToPath(import.meta.url)));
 let timer, building = false, pending = false;
 function build() {
  if (building) { pending = true; return; }

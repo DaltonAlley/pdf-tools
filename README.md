@@ -1,7 +1,7 @@
 # PDF Tools
 
 PDF Tools is a self-hosted web app with a Rust backend and Elm frontend, started
-in the browser by the shared OCaml `elm-browser` library also used by Squire. It
+in the browser by a JavaScript bootstrap bundled with this repository. It
 turns PDF pages into PNG or JPEG images, extracts selected pages as individual
 PDFs in a ZIP, merges PDFs, converts ordered PNG or JPEG images into a PDF, and
 imposes artwork onto print sheets.
@@ -116,12 +116,11 @@ No source checkout is required. Private packages require a registry login;
 an administrator can enable anonymous pulls by setting package visibility to
 Public. The
 release attachment pins that release's immutable image digest. If using the Compose file
-from the repository instead, `PDF_APP_VERSION` defaults to `0.2.17` and can be set
+from the repository instead, `PDF_APP_VERSION` defaults to `0.2.18` and can be set
 in `.env` to select another published version.
 
-To build locally instead, clone <https://github.com/theupsstore7452/pdf-tools>
-with `--recurse-submodules` (or run `git submodule update --init --recursive`), enter
-its repository root, and run:
+To build locally instead, clone <https://github.com/theupsstore7452/pdf-tools>,
+enter its repository root, and run:
 
 ```sh
 docker compose up -d --build --wait
@@ -218,6 +217,11 @@ public repository. The OCI source label links the package to this repository.
 
 ## Build from source
 
+The browser bootstrap is ordinary JavaScript at `frontend/browser/bootstrap.js`.
+CI and Docker build it with the Elm frontend using Node and the pinned npm
+dependencies. The frontend build checks its syntax and includes its contents in
+the versioned asset hash.
+
 The source-build command above runs from the standalone repository root and
 requires only Docker. For the pinned development shell and full checks, run from
 that same repository root:
@@ -247,8 +251,7 @@ just dev
 `nix develop .#commands` provides the lightweight container command tools.
 Use the default shell for `just dev`, `just check`, and source builds.
 
-Without Nix, install Rust with Clippy and rustfmt, Node, PDFium, OCaml, Dune,
-and `js_of_ocaml`. Set
+Without Nix, install Rust with Clippy and rustfmt, Node, and PDFium. Set
 `PDF_TOOLS_PDFIUM_PATH=/path/to/libpdfium.so` if PDFium is not on the library path.
 `just dev` installs the pinned npm dependencies, generates the API codecs, builds
 the frontend, starts Axum on <http://127.0.0.1:3200>, and watches frontend files.
@@ -275,8 +278,8 @@ frontend uses relative API URLs and works on ordinary HTTP origins without
 `crypto.randomUUID`, clipboard permissions, or a secure context.
 
 Elm owns workflow state, files, HTTP uploads, validation, polling, and stale
-response rejection. The shared `elm-browser` OCaml library mounts the app and
-handles theme storage. The [PDF browser adapter](frontend/bridge.js) manages
+response rejection. The [JavaScript bootstrap](frontend/browser/bootstrap.js)
+mounts the app and handles theme storage. The [PDF browser adapter](frontend/bridge.js) manages
 binary preview blobs, object URLs, downloads, native dialog focus, and
 crop pointer events. Rust remains authoritative for production geometry. See
 [frontend implementation notes](frontend/README.md) for resource lifecycles and
