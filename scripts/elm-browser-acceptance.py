@@ -154,6 +154,14 @@ class Suite:
         expect(self.page.locator('#workspace-dialog')).to_have_count(0)
         self.idle()
 
+    def wait_pending(self, pending):
+        deadline = time.monotonic() + 15
+        while not pending and time.monotonic() < deadline:
+            # Yield to Playwright's route handlers until the real backend has
+            # returned the response this recovery test is deliberately holding.
+            self.page.wait_for_timeout(20)
+        assert pending, 'Expected a held backend response before cancellation'
+
     def download(self, name, output):
         self.idle()
         with self.page.expect_download(timeout=60000) as download:
@@ -523,8 +531,8 @@ class Suite:
         self.page.route('**/pdf/inspect', lambda route: pending.append((route, route.fetch())))
         self.select(three)
         self.button('Cancel inspection').wait_for()
+        self.wait_pending(pending)
         self.button('Cancel inspection').click()
-        assert pending
         for route, response in pending:
             try: route.fulfill(response=response)
             except Exception: pass  # A native Elm Http.cancel may have already aborted it.
@@ -545,6 +553,7 @@ class Suite:
         pending = []
         self.page.route('**/jobs', lambda route: pending.append((route,route.fetch())))
         self.button('Download images').click()
+        self.wait_pending(pending)
         self.button('Cancel').click()
         for route,response in pending: route.fulfill(response=response)
         self.page.unroute('**/jobs')
@@ -1560,8 +1569,7 @@ class Suite:
         self.page.locator('.bleed-status').click()
         self.page.get_by_label('PDF bleed per side (in)',exact=True).fill('0.125')
         self.button('Use auto-detected bleed').wait_for()
-        self.page.wait_for_timeout(350)
-        assert pending
+        self.wait_pending(pending)
         current=self.page.locator('.sheet-svg image').first.get_attribute('href') or self.page.locator('.sheet-svg image').first.get_attribute('xlink:href')
         assert current==old_url, 'Displayed preview changed while its replacement was pending'
         for route,response in pending: route.fulfill(response=response)
@@ -1606,6 +1614,7 @@ class Suite:
         self.page.route('**/gang-up/sources',lambda route: pending.append((route,route.fetch())))
         self.select(six)
         self.button('Cancel').wait_for()
+        self.wait_pending(pending)
         self.button('Cancel').click()
         for route,response in pending: route.fulfill(response=response)
         self.page.unroute('**/gang-up/sources')
@@ -1620,12 +1629,13 @@ class Suite:
         source=self.source_ids[-1]
         self.button('Clear').click()
         self.button('Keep working').click()
+        expect(self.page.locator('#workspace-dialog')).to_have_count(0)
+        self.idle()
         self.expect_file('three.pdf')
         pending=[]
         self.page.route('**/gang-up/layout',lambda route:pending.append((route,route.fetch())))
         self.page.locator('#finished-width').fill('4.25')
-        self.page.wait_for_timeout(350)
-        assert pending
+        self.wait_pending(pending)
         self.button('Clear').click()
         self.button('Clear files').click()
         expect(self.button('Browse files')).to_be_visible()
