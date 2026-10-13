@@ -289,7 +289,13 @@ class Suite:
         self.idle()
 
     def step(self, name):
-        self.page.locator('.setup-stepper').get_by_role('tab', name=name, exact=True).click()
+        tab = self.page.locator('.setup-stepper').get_by_role('tab', name=name, exact=True)
+        tab.click()
+        # Step navigation restores focus on the next animation frame. Opening a
+        # popover before that completes makes its normal outside-focus handler
+        # close it again. Wait for rendering, without waiting for layout work.
+        self.page.evaluate('() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+        expect(tab).to_be_focused()
 
     def dropdown(self, name, value):
         if name == 'Apply preset' and not self.page.locator('.elm-presets-menu .da-popover').is_visible():
