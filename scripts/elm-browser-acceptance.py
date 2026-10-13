@@ -273,7 +273,11 @@ class Suite:
         self.page.locator('#finished-width').fill('3')
         self.page.locator('#finished-height').fill('2')
         self.idle()
-        expect(self.page.locator('.sheet-svg')).to_be_visible()
+        if self.page.viewport_size['width'] > 1100:
+            expect(self.page.locator('.sheet-svg')).to_be_visible()
+        else:
+            # The mobile Setup tab intentionally hides the ready preview.
+            expect(self.page.locator('.sheet-svg')).to_be_attached()
 
     def continue_to(self, step):
         self.step(step)
@@ -398,7 +402,7 @@ class Suite:
         expect(self.page.locator('.da-reorderable__item')).to_have_count(2)
         self.select([stripe, small_jpeg])
         self.idle()
-        expect(self.button('Images to PDF')).to_be_visible()
+        expect(self.page.get_by_role('combobox', name='Tool', exact=True)).to_have_text('Images to PDF')
         self.button('Move small.jpg up').click()
         path = self.download('Create PDF', 'images.pdf')
         with fitz.open(path) as document:
@@ -574,7 +578,7 @@ class Suite:
         self.idle()
         expect(self.page.locator('#finished-width')).to_have_value('3')
         expect(self.page.locator('#finished-height')).to_have_value('2')
-        expect(self.page.get_by_label('Finished orientation',exact=True)).to_be_enabled()
+        expect(self.page.get_by_role('combobox', name='Finished orientation', exact=True)).to_be_enabled()
         self.page.locator('#finished-width').fill('3')
         self.page.locator('#finished-height').fill('2')
         orientation = self.page.get_by_role('combobox', name='Finished orientation', exact=True)
@@ -621,7 +625,7 @@ class Suite:
         self.idle()
         expect(self.page.locator('#finished-width')).to_have_value('5')
         expect(self.page.locator('#finished-height')).to_have_value('7')
-        expect(self.page.get_by_label('Finished orientation', exact=True)).to_have_value('portrait')
+        expect(self.page.get_by_role('combobox', name='Finished orientation', exact=True)).to_have_text('Portrait')
         assert self.layouts[-1]['finishedCutSize'] == {'width': 5, 'height': 7}
         self.step('Bleed')
         path = self.download('Download imposed PDF', 'autofilled-5x7.pdf')
@@ -815,7 +819,8 @@ class Suite:
                     assert abs(tabs['y'] - toolbar['y']) < 1, (theme, width, tabs, toolbar)
                     assert abs(tabs['y'] + tabs['height'] - toolbar['y'] - toolbar['height']) < 1
                     assert abs(tabs['x'] - setup['x']) < 1
-                    assert abs(tabs['x'] + tabs['width'] - toolbar['x']) < 1
+                    side_border = self.page.locator('.elm-setup').evaluate('e => parseFloat(getComputedStyle(e).borderRightWidth)')
+                    assert abs(tabs['x'] + tabs['width'] + side_border - toolbar['x']) < 1
                 rows = self.page.locator('.impose-artwork-files .da-reorderable__item')
                 expect(rows).to_have_count(3)
                 dimensions = rows.evaluate_all('''rows => rows.map(row => {
@@ -1119,9 +1124,11 @@ class Suite:
         ]
         for label, width, height, rows, columns, save_step in workflows:
             self.step('Size')
+            self.button('Max per sheet').click()
             self.page.locator('#finished-width').fill(str(width))
             self.page.locator('#finished-height').fill(str(height))
-            self.step('Size')
+            # Custom grid seeds its rotation from the current automatic layout.
+            self.idle()
             self.button('Custom grid').click()
             self.page.get_by_label('Rows', exact=True).fill(str(rows))
             self.page.get_by_label('Columns', exact=True).fill(str(columns))
@@ -1679,7 +1686,8 @@ class Suite:
                 self.switch('Impose artwork')
                 self.idle()
                 self.page.wait_for_function("!document.querySelector('.elm-shell').hasAttribute('data-workspace-animating')")
-                frames = self.button(target).evaluate('''button => new Promise(resolve => {
+                self.page.get_by_role('combobox', name='Tool', exact=True).click()
+                frames = self.page.get_by_role('option', name=target, exact=True).evaluate('''button => new Promise(resolve => {
                   const bounds = selector => {
                     const element = document.querySelector(selector);
                     if (!element) return null;
