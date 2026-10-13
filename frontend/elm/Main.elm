@@ -96,6 +96,7 @@ init theme =
       , recent = []
       , fileOrder = Reorderable.initial
       , workspaceMenu = False
+      , presetsOpen = False
       , dropdowns = Dict.empty
       }
     , Cmd.batch (List.map catalog [ "presets", "recent-jobs" ])
@@ -658,6 +659,9 @@ updateInternal msg m =
         SetWorkspaceMenu open ->
             ( { m | workspaceMenu = open }, Cmd.none )
 
+        SetPresetsOpen open ->
+            ( { m | presetsOpen = open, dropdowns = Dict.empty }, Cmd.none )
+
         WorkspaceAction action ->
             let
                 next =
@@ -765,7 +769,7 @@ updateInternal msg m =
             else
                 let
                     next =
-                        { m | operation = op, error = "", notice = "", epoch = m.epoch + 1, revision = m.revision + 1, previewToken = m.previewToken + 1, selectedImpression = Nothing }
+                        { m | operation = op, presetsOpen = False, dropdowns = Dict.empty, error = "", notice = "", epoch = m.epoch + 1, revision = m.revision + 1, previewToken = m.previewToken + 1, selectedImpression = Nothing }
 
                     ( updated, cmd ) =
                         if op == Impose then
@@ -798,6 +802,9 @@ updateInternal msg m =
                             |> List.head
                             |> Maybe.map (\op -> updateInternal (Switch op) { next | dropdowns = Dict.empty })
                             |> Maybe.withDefault ( next, Cmd.none )
+
+                    else if key == "apply-preset" then
+                        updateInternal (ApplyPreset change.value) next
 
                     else
                         field key change.value next
@@ -1220,6 +1227,7 @@ updateInternal msg m =
                                         else
                                             Nothing
                                 }
+                            , dialog = m.dialog
                             , drafts = Dict.empty
                             , chosenWidth = True
                             , chosenHeight = True
@@ -1456,19 +1464,30 @@ field key value m =
 
                     else
                         single
-            in
-            schedule
-                { m
-                    | request =
-                        if value == "repeat" && not (List.isEmpty qs) then
-                            withQuantities qs next
 
-                        else
-                            next
-                    , repeatSingle = single
-                    , repeatDouble = double
-                    , quantityDrafts = Dict.empty
-                }
+                ( changed, command ) =
+                    schedule
+                        { m
+                            | request =
+                                if value == "repeat" && not (List.isEmpty qs) then
+                                    withQuantities qs next
+
+                                else
+                                    next
+                            , repeatSingle = single
+                            , repeatDouble = double
+                            , quantityDrafts = Dict.empty
+                        }
+            in
+            if value == "repeat" then
+                let
+                    ( opened, dialogCommand ) =
+                        update (OpenDialog "quantities") changed
+                in
+                ( opened, Cmd.batch [ command, dialogCommand ] )
+
+            else
+                ( changed, command )
 
         "sides" ->
             let

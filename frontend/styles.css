@@ -4082,8 +4082,10 @@ input[aria-invalid="true"] {
   opacity:1;
   pointer-events:none;
 }
-.sheet-guides .piece-cut-path { stroke:var(--accent); stroke-dasharray:6px 4px; }
+.sheet-guides .piece-cut-path { stroke:#d62828; stroke-dasharray:6px 4px; }
+.sheet-guides .piece-bleed-bound { stroke:#111; stroke-width:1.5px; stroke-dasharray:1px 4px; stroke-linecap:round; }
 .sheet-guides .preview-guide-halo { stroke:#fff; stroke-width:3.5px; }
+.sheet-guides .piece-bleed-bound-halo { stroke-dasharray:1px 4px; stroke-linecap:round; }
 .sheet-guides line.preview-guide-halo { stroke-dasharray:6px 4px; }
 .sheet-guides .piece-selection { stroke:var(--accent); stroke-width:2.5px; stroke-dasharray:none; }
 .sheet-guides .piece-selection-halo { stroke:var(--on-accent); stroke-width:5.5px; stroke-dasharray:none; }
@@ -4243,7 +4245,7 @@ small { color: var(--text-muted); }
 .elm-shell .file-row .icon-button { border-color: transparent; background: transparent; font-weight: 400; }
 .elm-shell .file-row .icon-button:hover:not(:disabled) { border-color: var(--border); background: var(--surface-muted); }
 .elm-shell .file-row .remove-file:hover:not(:disabled) { color: var(--danger); }
-.ready-card:not(.imposing) .tool-form { gap: 22px; border: 1px solid transparent; border-radius: 16px; padding: 22px; background: var(--surface-muted); }
+.ready-card:not(.imposing) .tool-form { height: auto; grid-template-rows: auto auto; gap: 16px; border: 1px solid transparent; border-radius: 16px; padding: 16px; background: var(--surface-muted); }
 .tool-form-head { gap: 7px; padding-bottom: 18px; }
 .tool-form-head h2 { font-size: 28px; font-weight: 700; }
 .tool-form-fields { gap: 18px; }
@@ -4318,7 +4320,7 @@ small { color: var(--text-muted); }
   .file-queue-head { align-items: start; gap: 12px; }
   .file-queue-head > small { max-width: 150px; text-align: right; line-height: 1.5; }
   .ready-card:not(.imposing) .workspace-grid.ordered-files { padding: 16px; }
-  .ready-card:not(.imposing) .tool-form { padding: 18px; }
+  .ready-card:not(.imposing) .tool-form { padding: 16px; }
   .elm-shell .elm-setup .gang-setup-fields { padding: 20px 16px; }
 }
 @media (max-width: 540px) {
@@ -4339,10 +4341,8 @@ small { color: var(--text-muted); }
 
 /* Reusable impose setups remain available alongside the sheet controls. */
 .elm-shell .elm-toolbar > .elm-presets-menu { margin-left: auto; }
-.elm-shell .elm-toolbar .elm-presets-menu > fieldset { width: min(420px, calc(100vw - 16px)); }
 .elm-shell .elm-toolbar .elm-presets-menu .field, .elm-shell .elm-toolbar .elm-presets-menu .elm-saved { min-width: 0; }
 .elm-shell .elm-toolbar .elm-presets-menu .elm-saved { padding: 0; }
-.elm-presets-menu .elm-saved > select { width: 100%; }
 .elm-presets-menu .elm-saved details > summary { padding: 8px 0; }
 .preview-side-controls { display: flex; align-items: center; }
 .preview-side-controls:empty { display: none; }
@@ -4458,8 +4458,9 @@ small { color: var(--text-muted); }
 
 /* The selected tool replaces the generic brand at the left of the header. */
 #pdf-ui .app-header { position: relative; z-index: 30; grid-template-columns: minmax(0, 1fr) auto; }
-#pdf-ui .app-tool-selector { min-width: 0; width: 220px; max-width: 100%; }
+#pdf-ui .app-tool-selector { min-width: 0; width: 240px; max-width: 100%; }
 #pdf-ui .app-tool-selector .da-field-presentation { width: 100%; margin: 0; }
+#pdf-ui .app-tool-selector .da-field--surface { padding: 0; border: 0; }
 #pdf-ui .app-tool-selector .da-dropdown__trigger {
   min-height: 44px; padding: 4px 12px; border-radius: var(--da-radius); font-size: 20px; font-weight: 700; line-height: 1.25;
 }
@@ -4483,6 +4484,36 @@ small { color: var(--text-muted); }
 #pdf-ui .impose-artwork-files .queue-heading { display: none; }
 #pdf-ui .impose-artwork-files .file-queue-head { display: none; }
 #pdf-ui .file-queue .da-file-list { min-width: 0; }
+/* Keep the queue and export panel on the same baseline. Short queues use the
+   available space, with a cap so a single file never becomes a giant tile. */
+#pdf-ui .ready-card:not(.imposing) .workspace-grid { align-items: stretch; }
+#pdf-ui .ready-card:not(.imposing) .tool-form {
+  height: auto;
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+#pdf-ui .ready-card:not(.imposing) .file-queue .da-file-list {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+#pdf-ui .ready-card:not(.imposing) .da-file-list .da-reorderable {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+#pdf-ui .ready-card:not(.imposing) .da-file-list .da-reorderable__list {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  max-height: calc(var(--file-count) * 144px);
+}
+#pdf-ui .ready-card:not(.imposing) .da-file-list .da-reorderable__item {
+  flex: 1 0 76px;
+  min-height: 76px;
+  max-height: 144px;
+  align-items: center;
+}
 #pdf-ui .page-selection-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; }
 #pdf-ui .app-header-actions { justify-content: flex-end; }
 #pdf-ui #workspace-actions-trigger { min-height: 44px; }
@@ -4515,4 +4546,57 @@ small { color: var(--text-muted); }
 @media (max-width: 540px) {
   #pdf-ui .app-tool-selector { width: 100%; }
   #pdf-ui .app-tool-selector .da-dropdown__trigger { font-size: 18px; }
+}
+
+/* File-only workflows keep the ordered queue wide and the export close by. */
+#pdf-ui .ready-card:not(.imposing) .workspace-grid.file-action-workspace {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+}
+#pdf-ui .ready-card:not(.imposing) .file-action-workspace .tool-form {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  overflow: visible;
+}
+#pdf-ui .file-action-workspace .tool-form-fields { flex: 1 1 240px; }
+#pdf-ui .file-action-workspace .field-help { margin: 0; }
+#pdf-ui .file-action-workspace .submit-row { flex: 0 0 auto; margin-left: auto; }
+#pdf-ui .file-action-workspace .submit-row button { min-width: 180px; }
+#pdf-ui .repeat-quantity-section {
+  position: relative;
+  gap: 8px;
+  padding: 16px;
+  border: 0;
+  border-radius: calc(var(--da-radius) * 1.67);
+  background: var(--da-surface-muted);
+}
+#pdf-ui .quantity-summary-label { color: var(--da-muted); font-size: 14px; padding-right: 52px; }
+#pdf-ui .quantity-summary-total { font-size: 20px; font-weight: 500; }
+#pdf-ui .quantity-summary-detail { margin: 0; color: var(--da-muted); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+#pdf-ui .quantity-summary-edit { position: absolute; top: 4px; right: 4px; }
+@media (max-width: 540px) {
+  #pdf-ui .file-action-workspace .tool-form-fields,
+  #pdf-ui .file-action-workspace .submit-row { flex-basis: 100%; }
+  #pdf-ui .file-action-workspace .submit-row button { width: 100%; }
+  #pdf-ui .app-header { gap: 8px; padding: 12px; }
+  #pdf-ui .app-header-actions { gap: 8px; }
+  #pdf-ui #workspace-actions-trigger { padding-inline: 12px; font-size: 14px; }
+  #pdf-ui .app-tool-selector > .da-field-presentation { width: 100%; min-width: 0; }
+  #pdf-ui .app-tool-selector .da-dropdown__value { min-width: 0; white-space: normal; overflow-wrap: normal; }
+}
+
+#pdf-ui .artwork-fitting .da-field__label,
+#pdf-ui .artwork-fitting .da-field__help {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+}
+#pdf-ui .artwork-fitting .da-radio-group__options { flex-wrap: nowrap; }
+#pdf-ui .elm-presets-menu .da-popover {
+  width: min(390px, calc(100vw - 16px)); max-height: min(580px, calc(100dvh - 16px)); overflow: auto;
 }

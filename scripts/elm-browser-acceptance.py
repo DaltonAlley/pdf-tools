@@ -282,27 +282,43 @@ class Suite:
     def step(self, name):
         self.page.locator('.setup-stepper').get_by_role('tab', name=name, exact=True).click()
 
+    def dropdown(self, name, value):
+        if name == 'Apply preset':
+            self.presets()
+        labels = {
+            '12x18': '12 × 18 in', '8.5x11': '8.5 × 11 in',
+            '11x17': '11 × 17 in', '13x19': '13 × 19 in', 'custom': 'Custom size',
+            'single': 'Single-sided', 'double': 'Double-sided',
+            'longEdge': 'Long edge', 'shortEdge': 'Short edge',
+        }
+        trigger = self.page.get_by_role('combobox', name=name, exact=True)
+        if trigger.get_attribute('aria-expanded') != 'true':
+            trigger.click()
+        self.page.get_by_role('option', name=labels.get(value, value), exact=True).click()
+        expect(trigger).to_have_attribute('aria-expanded', 'false')
+
+    def preset_option(self, name):
+        return self.page.locator('#apply-preset-listbox [role=option]').filter(has_text=name)
+
     def set_fitting(self, mode):
         control = self.page.get_by_role('group', name='Artwork fitting', exact=True)
-        button = control.get_by_role('button', name=mode, exact=True)
-        button.click()
-        expect(button).to_have_attribute('aria-pressed', 'true')
-        expect(control.locator('[aria-pressed="true"]')).to_have_count(1)
-
-
-
+        radio = control.get_by_role('radio', name=mode, exact=True)
+        radio.check()
+        expect(radio).to_be_checked()
+        expect(control.locator('input:checked')).to_have_count(1)
 
     def presets(self):
+        trigger = self.page.get_by_role('button', name='Presets', exact=True)
+        if trigger.get_attribute('aria-expanded') != 'true':
+            trigger.click()
         menu = self.page.locator('.elm-presets-menu')
-        if menu.get_attribute('open') is None:
-            menu.locator(':scope > summary').click()
-        expect(menu.locator(':scope > fieldset')).to_be_visible()
+        expect(menu.locator('.da-popover')).to_be_visible()
         return menu
 
     def close_presets(self):
-        menu = self.page.locator('.elm-presets-menu')
-        if menu.get_attribute('open') is not None:
-            menu.locator(':scope > summary').click()
+        trigger = self.page.get_by_role('button', name='Presets', exact=True)
+        if trigger.get_attribute('aria-expanded') == 'true':
+            trigger.click()
 
     def assert_pdf(self, path, labels, sizes=None):
         with fitz.open(path) as document:
@@ -639,14 +655,14 @@ class Suite:
         tabs = self.page.get_by_role('tablist', name='Print setup options')
         expect(tabs.get_by_role('tab')).to_have_count(3)
         expect(tabs.get_by_role('tab')).to_have_text(['Size', 'Sheet', 'Bleed'])
-        self.step('Sheet')
-        panel = self.page.get_by_role('tabpanel', name='Sheet', exact=True)
+        self.step('Size')
+        panel = self.page.get_by_role('tabpanel', name='Size', exact=True)
         expect(panel.get_by_role('heading', name='Arrangement', exact=True)).to_be_visible()
         self.button('Custom grid').click()
         self.page.get_by_label('Rows', exact=True).fill('1')
         self.page.get_by_label('Columns', exact=True).fill('2')
         self.step('Bleed')
-        self.step('Sheet')
+        self.step('Size')
         expect(self.page.get_by_label('Rows', exact=True)).to_have_value('1')
         expect(self.page.get_by_label('Columns', exact=True)).to_have_value('2')
         for name in ['Bleed', 'Sheet', 'Size']:
@@ -679,9 +695,9 @@ class Suite:
         self.idle()
         expect(self.button('Download imposed PDF')).to_be_enabled()
         control = self.page.get_by_role('group', name='Artwork fitting', exact=True)
-        control.get_by_role('button', name='Stretch', exact=True).focus()
-        self.page.keyboard.press('Enter')
-        expect(control.get_by_role('button', name='Stretch', exact=True)).to_have_attribute('aria-pressed', 'true')
+        control.get_by_role('radio', name='Stretch', exact=True).focus()
+        self.page.keyboard.press('Space')
+        expect(control.get_by_role('radio', name='Stretch', exact=True)).to_be_checked()
         for mode in ['Fill', 'Stretch', 'Fit']:
             self.set_fitting(mode)
             self.idle()
@@ -913,9 +929,11 @@ class Suite:
                 }''')
                 self.step('Sheet')
                 self.button('Repeat pages').click()
+                expect(self.page.locator('#workspace-dialog')).to_be_visible()
+                self.button('Done').click()
                 opener = self.button('Edit copy quantities')
                 for printing, quantities in [('single', [3] * 6), ('double', [3] * 3)]:
-                    self.page.get_by_label('Printing', exact=True).select_option(printing)
+                    self.dropdown('Printing', printing)
                     self.idle()
                     opener.click()
                     dialog = self.page.locator('#workspace-dialog')
@@ -958,9 +976,9 @@ class Suite:
             toolbar = self.page.locator('.elm-toolbar')
             control = toolbar.get_by_role('group', name='Artwork fitting', exact=True)
             expect(control).to_be_visible()
-            expect(control.get_by_role('button')).to_have_text(['Fit', 'Fill', 'Stretch'])
+            expect(control.get_by_role('radio')).to_have_count(3)
+            expect(control.locator('.da-radio-option label')).to_have_text(['Fit', 'Fill', 'Stretch'])
             expect(toolbar.get_by_role('combobox', name='Artwork fitting', exact=True)).to_have_count(0)
-            expect(control).to_have_text('FitFillStretch')
             expect(toolbar.locator('.elm-artwork-menu')).to_have_count(0)
             for label in ['Artwork rotation', 'Impression orientation', 'Adjust only selected artwork', 'Selected artwork', 'Horizontal position', 'Vertical position', 'Artwork finished width (in)', 'Artwork finished height (in)']:
                 expect(toolbar.get_by_label(label, exact=True)).to_have_count(0)
@@ -976,7 +994,7 @@ class Suite:
                 assert bounds['x'] >= 0 and bounds['x'] + bounds['width'] <= width + 1, bounds
             self.page.screenshot(path=str(self.out/f'artwork-fitting-{width}x{height}.png'))
         self.page.set_viewport_size({'width': 1366, 'height': 900})
-        self.checks.append('artwork fitting: direct Fit/Fill/Stretch buttons without a header, no Artwork disclosure or other artwork controls, stable toolbar and narrow-screen reachability')
+        self.checks.append('artwork fitting: DA segmented Fit/Fill/Stretch field without a header, no Artwork disclosure or other artwork controls, stable toolbar and narrow-screen reachability')
 
 
     def preview_toolbar(self):
@@ -984,6 +1002,7 @@ class Suite:
         self.impose(stripe)
         self.step('Sheet')
         self.button('Repeat pages').click()
+        self.button('Done').click()
         self.page.get_by_label('Copies', exact=True).fill('61')
         self.idle()
         toolbar = self.page.locator('.elm-toolbar')
@@ -992,6 +1011,7 @@ class Suite:
             expect(self.page.get_by_role('checkbox', name=name, exact=True)).to_have_count(0)
         expect(self.page.locator('.piece-cut')).to_have_count(0)
         expect(self.page.locator('.piece-bleed')).to_have_count(0)
+        expect(self.page.locator('.preview-bleed-status')).to_have_count(0)
         # Every cut edge has one sheet-spanning path, above all artwork.
         def assert_paths():
             self.page.locator('.sheet-svg').evaluate('''svg => {
@@ -1003,6 +1023,17 @@ class Suite:
           for (const y of horizontal) if (!paths.some(p => +p.getAttribute('y1') === y && +p.getAttribute('y2') === y)) throw new Error('Missing horizontal cut');
           for (const x of vertical) if (!paths.some(p => +p.getAttribute('x1') === x && +p.getAttribute('x2') === x)) throw new Error('Missing vertical cut');
           if (svg.lastElementChild.classList.value !== 'sheet-guides') throw new Error('Guides can be covered by artwork');
+          for (const bleed of svg.querySelectorAll('.piece-bleed-bound')) {
+            const cut = svg.querySelector('#sheet-item-' + bleed.dataset.impressionIndex + ' .piece-hit-area');
+            const amount = +bleed.dataset.bleedAmount;
+            if (!cut || amount <= 0) throw new Error('Bleed shown for an empty impression or zero bleed');
+            for (const [key, expected] of [
+              ['x', +cut.getAttribute('x') - amount], ['y', +cut.getAttribute('y') - amount],
+              ['width', +cut.getAttribute('width') + 2 * amount], ['height', +cut.getAttribute('height') + 2 * amount]
+            ]) if (Math.abs(+bleed.getAttribute(key) - expected) > .00001) throw new Error('Incorrect bleed boundary: ' + key);
+            const style = getComputedStyle(bleed);
+            if (style.stroke !== 'rgb(17, 17, 17)' || style.strokeDasharray !== '1px, 4px') throw new Error('Bleed must be black and dotted');
+          }
             }''')
         assert_paths()
         for width, height in [(1366, 900), (1101, 768), (800, 900), (620, 700), (540, 700), (390, 700), (320, 568)]:
@@ -1015,7 +1046,7 @@ class Suite:
               const r = e.getBoundingClientRect(), previous = e.querySelector('.previous').getBoundingClientRect(), next = e.querySelector('.next').getBoundingClientRect();
               return {x:r.x, y:r.y, width:r.width, height:r.height,
                 rightAligned:Math.abs(e.querySelector('.elm-presets-menu').getBoundingClientRect().right - (r.left + Math.max(e.clientWidth,e.scrollWidth) - e.scrollLeft - parseFloat(getComputedStyle(e).paddingRight))) < 2,
-                oneRow:[...e.querySelectorAll(':scope > details > summary, .preview-side-controls button, .sheet-nav-status, .sheet-nav-button')].every(control => Math.abs(control.getBoundingClientRect().top + control.getBoundingClientRect().height/2 - (previous.top+previous.height/2)) < 2),
+                oneRow:[...e.querySelectorAll('#impose-presets-trigger, .artwork-fitting .da-radio-group__options, .preview-side-controls button, .sheet-nav-status, .sheet-nav-button')].every(control => Math.abs(control.getBoundingClientRect().top + control.getBoundingClientRect().height/2 - (previous.top+previous.height/2)) < 2),
                 adjacent:Math.abs(previous.top - next.top) < 1 && previous.right <= next.left};
             }''')
             assert geometry['rightAligned'] and geometry['adjacent'] and geometry['oneRow'], (width, height, geometry)
@@ -1035,8 +1066,8 @@ class Suite:
             assert all(abs(after[key] - before[key]) < 1 for key in before), (width, height, 'Sheet navigation moves the toolbar')
             for name in ['Zoom in', 'Zoom out', 'Fit sheet', 'Hide setup toolbar', 'Show setup toolbar']:
                 expect(self.button(name)).to_have_count(0)
-            style = self.page.locator('.piece-cut-path').first.evaluate('e => { const s=getComputedStyle(e); return {width:s.strokeWidth, vector:s.vectorEffect, dash:s.strokeDasharray}; }')
-            assert style == {'width':'1.5px', 'vector':'non-scaling-stroke', 'dash':'6px, 4px'}, style
+            style = self.page.locator('.piece-cut-path').first.evaluate('e => { const s=getComputedStyle(e); return {width:s.strokeWidth, vector:s.vectorEffect, dash:s.strokeDasharray, color:s.stroke}; }')
+            assert style == {'width':'1.5px', 'vector':'non-scaling-stroke', 'dash':'6px, 4px', 'color':'rgb(214, 40, 40)'}, style
             assert_paths()
             self.page.screenshot(path=str(self.out/f'preview-toolbar-{width}x{height}.png'))
         # The side toggle adds another toolbar control; keep setup usable on
@@ -1045,7 +1076,7 @@ class Suite:
         self.fresh()
         self.impose([a_pdf, b_pdf])
         self.step('Sheet')
-        self.page.get_by_label('Printing', exact=True).select_option('double')
+        self.dropdown('Printing', 'double')
         self.idle()
         for width, height in [(1366, 900), (390, 700), (320, 568)]:
             self.page.set_viewport_size({'width': width, 'height': height})
@@ -1069,14 +1100,16 @@ class Suite:
         self.impose(stripe)
         self.step('Sheet')
         self.button('Repeat pages').click()
+        self.button('Done').click()
         self.page.get_by_label('Copies', exact=True).fill('61')
         self.idle()
         menu = self.page.locator('.elm-presets-menu')
-        menu.locator(':scope > summary').focus()
-        menu.locator(':scope > summary').press('Space')
-        expect(menu.locator(':scope > fieldset')).to_be_visible()
-        menu.locator(':scope > summary').press('Enter')
-        expect(menu.locator(':scope > fieldset')).to_be_hidden()
+        trigger = self.page.get_by_role('button', name='Presets', exact=True)
+        trigger.focus()
+        trigger.press('Space')
+        expect(menu.locator('.da-popover')).to_be_visible()
+        self.page.keyboard.press('Escape')
+        expect(menu.locator('.da-popover')).to_be_hidden()
         presets = []
         workflows = [
             ('21 business cards', 3.5, 2, 7, 3, 'Size'),
@@ -1088,7 +1121,7 @@ class Suite:
             self.step('Size')
             self.page.locator('#finished-width').fill(str(width))
             self.page.locator('#finished-height').fill(str(height))
-            self.step('Sheet')
+            self.step('Size')
             self.button('Custom grid').click()
             self.page.get_by_label('Rows', exact=True).fill(str(rows))
             self.page.get_by_label('Columns', exact=True).fill(str(columns))
@@ -1100,20 +1133,21 @@ class Suite:
             name = f'{label} {self.name} {time.time_ns()}'
             self.page.get_by_label('Setup name', exact=True).fill(name)
             self.button('Save as new preset').click()
-            option = self.page.get_by_label('Apply preset').locator('option').filter(has_text=name)
+            option = self.preset_option(name)
             expect(option).to_have_count(1)
-            presets.append((option.get_attribute('value'), expected, save_step))
+            presets.append((name, expected, save_step))
             self.close_presets()
         # Load from every production step and retain the artwork/copy count.
         self.fresh()
         self.impose(stripe)
         self.step('Sheet')
         self.button('Repeat pages').click()
+        self.button('Done').click()
         self.page.get_by_label('Copies', exact=True).fill('61')
         for preset_id, expected, load_step in presets:
             self.step(load_step)
             self.presets()
-            self.page.get_by_label('Apply preset').select_option(preset_id)
+            self.dropdown('Apply preset', preset_id)
             self.idle()
             actual = self.layouts[-1]
             for key in ['finishedCutSize', 'parentSheetSize', 'rows', 'columns', 'piecesPerSheet', 'gutters', 'orientationPreference', 'bleed']:
@@ -1127,9 +1161,9 @@ class Suite:
             if width <= 1100:
                 self.page.get_by_role('tab', name='Preview', exact=True).click()
             self.presets()
-            panel = menu.locator(':scope > fieldset').bounding_box()
+            panel = menu.locator('.da-popover').bounding_box()
             assert panel['x'] >= 0 and panel['x'] + panel['width'] <= width + 1 and panel['y'] + panel['height'] <= height + 1, (width, height, panel)
-            self.page.get_by_label('Apply preset').select_option(presets[0][0])
+            self.dropdown('Apply preset', presets[0][0])
             self.idle()
             assert self.layouts[-1]['piecesPerSheet'] == 21
             self.page.get_by_label('Setup name', exact=True).fill(f'Preview save {self.name} {width} {time.time_ns()}')
@@ -1181,7 +1215,7 @@ class Suite:
         assert len(self.layouts[-1]['pagePlans']) == 6
         self.continue_to('Sheet')
         self.button('Repeat pages').click()
-        self.button('Edit copy quantities').click()
+        expect(self.page.locator('#workspace-dialog')).to_be_visible()
         self.page.locator('#bulk-copy-quantity').fill('-1')
         expect(self.button('Apply to all')).to_be_disabled()
         self.page.locator('#bulk-copy-quantity').fill('0')
@@ -1198,10 +1232,10 @@ class Suite:
         self.button('Done').click()
         self.idle()
         assert self.layouts[-1]['impressionQuantities']==[2,0,2,2,2,2]
-        self.page.get_by_label('Printing',exact=True).select_option('double')
+        self.dropdown('Printing', 'double')
         self.idle()
         assert len(self.layouts[-1]['impressionQuantities']) == 3
-        self.page.get_by_label('Printing',exact=True).select_option('single')
+        self.dropdown('Printing', 'single')
         self.idle()
         assert self.layouts[-1]['impressionQuantities']==[2,0,2,2,2,2]
         self.set_fitting('Stretch')
@@ -1218,25 +1252,29 @@ class Suite:
         name=f'Elm {self.name} acceptance {time.time_ns()}'
         self.page.get_by_label('Setup name',exact=True).fill(name)
         self.button('Save preset').click()
-        expect(self.page.get_by_label('Apply preset').locator('option').filter(has_text=name)).to_have_count(1)
-        preset_id=self.page.get_by_label('Apply preset').locator('option').filter(has_text=name).get_attribute('value')
+        expect(self.preset_option(name)).to_have_count(1)
+        preset_id=name
         self.button('Save recent job').click()
         if self.page.get_by_text('Recent jobs',exact=True).locator('..').get_attribute('open') is None:
             self.page.get_by_text('Recent jobs',exact=True).click()
         expect(self.page.locator('.elm-saved li').filter(has_text=name)).to_have_count(2)
         self.page.locator('#finished-width').fill('bad')
         expect(self.button('Continue')).to_be_enabled()
-        self.page.get_by_label('Apply preset').select_option(preset_id)
+        self.presets()
+        manage = self.page.locator('.elm-saved details').filter(has=self.page.get_by_text('Manage presets', exact=True))
+        if manage.get_attribute('open') is None:
+            manage.locator('summary').click()
+        manage.locator('li').filter(has_text=preset_id).get_by_role('button', name='Apply', exact=True).click()
         expect(self.page.locator('#finished-width')).to_have_value('3')
         self.idle()
         assert self.layouts[-1]['impressionQuantities']==[2,0,2,2,2,2]
         self.expect_file('mixed.pdf')
         self.page.get_by_label('Setup name',exact=True).fill(name+' renamed')
         self.button('Update preset').click()
-        expect(self.page.get_by_label('Apply preset').locator('option').filter(has_text=name+' renamed')).to_have_count(1)
+        expect(self.preset_option(name+' renamed')).to_have_count(1)
         self.page.get_by_label('Setup name',exact=True).fill(name+' renamed again')
         self.button('Rename').click()
-        expect(self.page.get_by_label('Apply preset').locator('option').filter(has_text=name+' renamed again')).to_have_count(1)
+        expect(self.preset_option(name+' renamed again')).to_have_count(1)
         expect(self.page.get_by_text('Export history',exact=True)).to_have_count(0)
         assert self.context.request.get(args.url+'/gang-up/export-history').status == 404
         recent=self.page.locator('.elm-saved details').filter(has=self.page.get_by_text('Recent jobs',exact=True))
@@ -1245,11 +1283,11 @@ class Suite:
         self.idle()
         self.close_presets()
         self.step('Sheet')
-        self.page.get_by_label('Printing',exact=True).select_option('double')
+        self.dropdown('Printing', 'double')
         self.idle()
         self.step('Sheet')
         self.page.get_by_text('Advanced sheet settings',exact=True).click()
-        self.page.get_by_label('Duplex flip edge',exact=True).select_option('shortEdge')
+        self.dropdown('Duplex flip edge', 'shortEdge')
         self.page.get_by_label('Rotate back side 180°',exact=True).check()
         self.idle()
         self.step('Bleed')
@@ -1258,12 +1296,13 @@ class Suite:
         with fitz.open(path) as doc:
             assert len(doc)==2*layout['sheetsRequired']
             assert 'ART-1' in doc[0].get_text() and 'ART-2' in doc[1].get_text()
-        self.step('Sheet')
+        self.step('Size')
         self.button('Custom grid').click()
         self.page.get_by_label('Rows',exact=True).fill('2')
         self.page.get_by_label('Columns',exact=True).fill('2')
         self.idle()
         assert self.layouts[-1]['rows']==2 and self.layouts[-1]['columns']==2
+        self.step('Sheet')
         self.page.get_by_text('Advanced sheet settings',exact=True).click()
         self.page.get_by_label('Center grid automatically',exact=True).uncheck()
         remaining=self.layouts[-1]['margins']['top']+self.layouts[-1]['margins']['bottom']
@@ -1275,9 +1314,10 @@ class Suite:
         assert abs(self.layouts[-1]['margins']['top']-.5)<.001
         self.step('Size')
         self.presets()
-        self.page.get_by_text('Manage presets',exact=True).click()
+        if manage.get_attribute('open') is None:
+            manage.locator('summary').click()
         self.page.locator('.elm-saved li').filter(has_text=name+' renamed again').get_by_role('button',name='Delete',exact=True).click()
-        expect(self.page.get_by_label('Apply preset').locator('option').filter(has_text=name)).to_have_count(0)
+        expect(self.preset_option(name)).to_have_count(0)
         if self.page.get_by_text('Recent jobs',exact=True).locator('..').get_attribute('open') is None:
             self.page.get_by_text('Recent jobs',exact=True).click()
         self.page.locator('.elm-saved li').filter(has_text=name).get_by_role('button',name='Delete',exact=True).click()
@@ -1292,6 +1332,7 @@ class Suite:
         self.page.locator('#finished-height').fill('11')
         self.step('Sheet')
         self.button('Repeat pages').click()
+        self.button('Done').click()
         self.page.get_by_label('Copies',exact=True).fill('2')
         self.idle()
         first = self.page.locator('#sheet-item-0')
@@ -1472,7 +1513,7 @@ class Suite:
         self.step('Size')
         self.step('Sheet')
         self.button('Repeat pages').click()
-        self.button('Edit copy quantities').click()
+        expect(self.page.locator('#workspace-dialog')).to_be_visible()
         self.page.locator('#bulk-copy-quantity').fill('2')
         self.button('Apply to all').click()
         self.idle()

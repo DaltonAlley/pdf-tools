@@ -87,6 +87,7 @@ type alias Model =
     , recent : List A.RecentGangUpJob
     , fileOrder : Reorderable.State
     , workspaceMenu : Bool
+    , presetsOpen : Bool
     , dropdowns : Dict String Dropdown.State
     }
 
@@ -101,6 +102,7 @@ type Msg
     | Remove Int
     | Reordered Reorderable.Change
     | SetWorkspaceMenu Bool
+    | SetPresetsOpen Bool
     | WorkspaceAction String
     | Switch Operation
     | Field String String

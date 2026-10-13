@@ -33,7 +33,7 @@ size until you edit it, choose a finished orientation, or apply a saved setup;
 those choices are retained when artwork changes. Mixed-size artwork shares the
 first page's default finished size.
 
-Use the **Fit**, **Fill**, and **Stretch** buttons above the preview to choose
+Use the **Fit**, **Fill**, and **Stretch** segmented field above the preview to choose
 how artwork fits the finished size.
 
 - **Fit** preserves proportions and content, with white borders
@@ -58,20 +58,23 @@ quantities. Presets can be created, renamed, updated, applied, or deleted.
 
 **Fit**, **Fill**, and **Stretch** stay directly available in the toolbar above
 the sheet preview as you move between the Size, Sheet, and Bleed tabs. Sheet
-contains quantity, sheet size, printing, arrangement, custom-grid, gutter,
-margin, and duplex settings. All three tabs
-are available immediately, including while settings are incomplete or a preview
+contains quantity, sheet size, printing, gutter, margin, and duplex settings.
+Size contains finished dimensions, orientation, arrangement, and custom-grid
+settings. All three tabs are available immediately, including while settings are incomplete or a preview
 is loading. Use the arrow keys, Home, or End to navigate the tabs. Open the
 advanced sheet settings to adjust gutters, custom margins, or duplex behavior.
 On narrow screens, the toolbar stays
 outside the Setup panel while **Preview** remains focused on inspecting the
 sheet.
 
-Dashed cut paths are always visible on the sheet preview, and the sheet fits its
-canvas automatically. **Presets**, **Previous sheet**, and **Next sheet** stay at
-the far right of the toolbar. These controls stay in one row; on narrow screens,
+Red dashed cut paths are always visible on the sheet preview. Black dotted
+rectangles show the outside bleed bounds where bleed is present, and the sheet
+fits its canvas automatically. **Presets**, **Previous sheet**, and **Next sheet**
+stay at the far right of the toolbar. Selection menus use the shared DA dropdown, and
+the header tool selector has a visible surface before hover. These controls stay
+in one row; on narrow screens,
 scroll the toolbar horizontally to reach them. Selecting an impression shows a
-black or white outline with a narrow contrasting border around its finished cut,
+blue outline with a narrow contrasting border around its finished cut,
 including while its rotation menu is open. The outline stays the same thickness
 as the canvas resizes.
 
@@ -86,7 +89,7 @@ when restoring job settings.
 Mixed-size PDF pages and images can share one manually defined finished size.
 Mixed pieces use regular slots large enough for the largest piece, with
 individual cut guides, not an optimized nesting algorithm. The toolbar fitting
-buttons apply to all artwork; saved per-piece settings remain supported. Duplex
+choices apply to all artwork; saved per-piece settings remain supported. Duplex
 pairs must have matching finished cuts, and odd source counts cannot be paired
 automatically. In **Edit copy quantities**, **Apply to all** or Enter in
 **Copies for all** commits the entered quantity to every page or pair and closes

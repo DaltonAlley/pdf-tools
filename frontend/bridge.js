@@ -64,6 +64,7 @@ export function connect(app) {
   const animateWorkspace = () => {
     const shell = document.querySelector('.elm-shell');
     if (!shell) return;
+    const wasGeneric = shell.classList.contains('generic-shell');
     // Capture the current visual bounds before Elm renders the new workflow.
     // This also lets a reversed transition continue from its current position.
     const frames = ['.app-header', '.ready-shell', '.ready-card'].map(selector => {
@@ -75,7 +76,8 @@ export function connect(app) {
     workspaceFrame = requestAnimationFrame(() => {
       if (!shell.isConnected || shell.classList.contains('empty-shell')) return;
       const style = getComputedStyle(shell);
-      const options = {duration:parseFloat(style.getPropertyValue('--workspace-duration')), easing:style.getPropertyValue('--workspace-easing').trim()};
+      const genericSwitch = wasGeneric && shell.classList.contains('generic-shell');
+      const options = {duration:genericSwitch ? 220 : parseFloat(style.getPropertyValue('--workspace-duration')), easing:style.getPropertyValue('--workspace-easing').trim()};
       // Measure the settled layout before temporary animation alignment changes
       // the header's intrinsic width. Otherwise it shrinks too far, then jumps
       // back to its stretched width when the animation is removed.
@@ -245,45 +247,6 @@ export function connect(app) {
   });
   const visible = () => { if (document.visibilityState === 'visible') send({action:'visible'}); };
   document.addEventListener('visibilitychange',visible);
-  const fitPopover = details => {
-    const panel = details?.matches?.('.elm-toolbar details') && details.querySelector(':scope > fieldset');
-    if (panel) {
-      // The trigger and CSS width are measurable while details is closed.
-      // Position before native activation so the first frame is already final;
-      // a deferred toggle callback used to move the panel after it appeared.
-      const bounds = details.getBoundingClientRect();
-      const width = parseFloat(getComputedStyle(panel).width);
-      panel.style.left = `${Math.max(8,Math.min(bounds.left,innerWidth-width-8))}px`;
-      panel.style.top = `${bounds.bottom}px`;
-      panel.style.maxHeight = `${Math.max(80,Math.min(580,innerHeight-bounds.bottom-12))}px`;
-    }
-  };
-  document.addEventListener('click',event => {
-    const trigger = event.target.closest('.elm-toolbar details > summary');
-    if (trigger) fitPopover(trigger.parentElement);
-  },true);
-  document.addEventListener('toggle',event => {
-    if (!event.target.matches?.('.elm-toolbar details')) return;
-    const panel = event.target.querySelector(':scope > fieldset');
-    if (event.target.open) {
-      fitPopover(event.target);
-      panel?.showPopover();
-    } else if (panel?.matches(':popover-open')) panel.hidePopover();
-  },true);
-  document.addEventListener('scroll',event => {
-    if (event.target.matches?.('.elm-toolbar')) document.querySelectorAll('.elm-toolbar details[open]').forEach(fitPopover);
-  },true);
-  window.addEventListener('resize',() => document.querySelectorAll('.elm-toolbar details[open]').forEach(fitPopover));
-  // Saving can insert feedback above the toolbar or change the menu contents.
-  // Keep open panels anchored after Elm updates without observing our styles.
-  let popoverFrame;
-  new MutationObserver(() => {
-    if (popoverFrame) return;
-    popoverFrame = requestAnimationFrame(() => {
-      popoverFrame = undefined;
-      document.querySelectorAll('.elm-toolbar > details[open]').forEach(fitPopover);
-    });
-  }).observe(document.querySelector('.elm-shell'), {subtree:true, childList:true, characterData:true});
   // FileList is not a JSON array; keep File objects native and adapt only the
   // browser event payload for Elm's File.decoder.
   document.addEventListener('drop',event => {

@@ -9,6 +9,7 @@ import Da.Feedback as Feedback
 import Da.Field as DaField
 import Da.FileList as FileList
 import Da.Menu as Menu
+import Da.Popover as Popover
 import Da.Theme as Theme
 import Da.ThemeToggle as ThemeToggle
 import Dict
@@ -29,7 +30,7 @@ import Validation as V
 toolSelector : Model -> Html Msg
 toolSelector m =
     nav [ class "app-brand app-tool-selector", attribute "aria-label" "Tools" ]
-        [ DaField.present DaField.Embedded [] (dropdownView (toolDropdown m)) ]
+        [ DaField.present DaField.Compact [] (dropdownView (toolDropdown m)) ]
 
 
 btn : String -> Msg -> Html Msg
@@ -75,13 +76,6 @@ fieldOptions =
     List.map (\( value, title ) -> { value = value, label = title, disabled = False })
 
 
-selectField : String -> String -> String -> List ( String, String ) -> Html Msg
-selectField title key selected options =
-    DaField.select []
-        (DaField.config key title)
-        { value = selected, onInput = Field key, options = fieldOptions options }
-
-
 dropdownControl : Model -> DaField.Config -> String -> List ( String, String ) -> ( DaField.Config, Dropdown.Control Msg )
 dropdownControl m config selected options =
     ( config
@@ -119,6 +113,59 @@ orientationDropdown m =
         [ ( "portrait", "Portrait" ), ( "landscape", "Landscape" ) ]
 
 
+sheetDropdown : Model -> ( DaField.Config, Dropdown.Control Msg )
+sheetDropdown m =
+    dropdownControl m
+        (DaField.config "sheet" "Print sheet size")
+        (if Dict.member "sheet-custom" m.drafts then
+            "custom"
+
+         else
+            sheetName m.request.parentSheetSize
+        )
+        [ ( "12x18", "12 × 18 in" ), ( "8.5x11", "8.5 × 11 in" ), ( "11x17", "11 × 17 in" ), ( "13x19", "13 × 19 in" ), ( "custom", "Custom size" ) ]
+
+
+printingDropdown : Model -> ( DaField.Config, Dropdown.Control Msg )
+printingDropdown m =
+    let
+        ( config, control ) =
+            dropdownControl m
+                (DaField.config "sides" "Printing")
+                (if m.request.sides == A.SidesDouble then
+                    "double"
+
+                 else
+                    "single"
+                )
+                [ ( "single", "Single-sided" ), ( "double", "Double-sided" ) ]
+    in
+    ( config
+    , { control | options = List.map (\option -> { option | disabled = option.value == "double" && modBy 2 (Maybe.withDefault 1 m.request.sourcePageCount) /= 0 }) control.options }
+    )
+
+
+flipDropdown : Model -> ( DaField.Config, Dropdown.Control Msg )
+flipDropdown m =
+    dropdownControl m
+        (DaField.config "flip" "Duplex flip edge")
+        (if Maybe.map .flipEdge m.request.duplex == Just A.DuplexFlipEdgeShortEdge then
+            "shortEdge"
+
+         else
+            "longEdge"
+        )
+        [ ( "longEdge", "Long edge" ), ( "shortEdge", "Short edge" ) ]
+
+
+presetDropdown : Model -> ( DaField.Config, Dropdown.Control Msg )
+presetDropdown m =
+    dropdownControl m
+        (DaField.config "apply-preset" "Apply preset")
+        (Maybe.withDefault "" m.editingPreset)
+        (( "", "Choose a preset" ) :: List.map (\preset -> ( preset.id, preset.name )) m.presets)
+
+
 dropdownView : ( DaField.Config, Dropdown.Control Msg ) -> Html Msg
 dropdownView ( config, control ) =
     Dropdown.view [] config control
@@ -131,8 +178,31 @@ visibleDropdowns m =
 
     else
         toolDropdown m
-            :: (if m.operation == Impose && m.source /= Nothing && m.step == 0 && m.rail /= "preview" then
-                    [ orientationDropdown m ]
+            :: (if m.operation == Impose && m.source /= Nothing then
+                    (if m.presetsOpen then
+                        [ presetDropdown m ]
+
+                     else
+                        []
+                    )
+                        ++ (if m.rail == "preview" then
+                                []
+
+                            else if m.step == 0 then
+                                [ orientationDropdown m ]
+
+                            else if m.step == 1 then
+                                [ sheetDropdown m, printingDropdown m ]
+                                    ++ (if m.request.sides == A.SidesDouble then
+                                            [ flipDropdown m ]
+
+                                        else
+                                            []
+                                       )
+
+                            else
+                                []
+                           )
 
                 else
                     []
@@ -383,7 +453,7 @@ queueView m =
         [ div [ class "file-queue-head" ]
             [ div [ class "queue-heading" ] [ h2 [] [ text "Files" ], span [ class "count-badge" ] [ text (String.fromInt (List.length m.files)) ] ]
             ]
-        , FileList.view []
+        , FileList.view [ style "--file-count" (String.fromInt (List.length m.files)) ]
             { id = "file-queue", label = "Selected files", moveUp = "Move up", moveDown = "Move down", remove = "Remove" }
             { items =
                 List.map
@@ -550,7 +620,7 @@ genericView m =
                 _ ->
                     "Download PDF"
     in
-    div [ class "workspace-grid ordered-files" ]
+    div [ classList [ ( "workspace-grid ordered-files", True ), ( "file-action-workspace", List.member m.operation [ Merge, ImagePdf ] ) ] ]
         [ queueView m
         , Html.form [ class "tool-form", attribute "aria-label" (Model.operationLabel m.operation ++ " settings"), onSubmit Submit ]
             [ fieldset [ class "tool-form-fields", disabled m.busy ] fields
@@ -690,6 +760,21 @@ setupView m =
                     [ h3 [] [ text "Finished size" ]
                     , div [ class "field-grid two" ] [ numberField m "Width (in)" "finished-width" r.finishedCutSize.width, numberField m "Height (in)" "finished-height" r.finishedCutSize.height ]
                     , dropdownView (orientationDropdown m)
+                    , h3 [] [ text "Arrangement" ]
+                    , choices "Sheet arrangements"
+                        "layout"
+                        (if r.layoutMode == A.LayoutModeManual then
+                            "manual"
+
+                         else
+                            "maxPieces"
+                        )
+                        [ ( "maxPieces", "Max per sheet" ), ( "manual", "Custom grid" ) ]
+                    , if r.layoutMode == A.LayoutModeManual then
+                        div [ class "field-grid two" ] [ numberField m "Rows" "rows" (toFloat manual.rows), numberField m "Columns" "columns" (toFloat manual.columns) ]
+
+                      else
+                        text ""
                     , if not m.chosenWidth || not m.chosenHeight then
                         p [ class "field-help" ] [ text "Choose both finished dimensions or apply a preset." ]
 
@@ -724,74 +809,56 @@ setupView m =
                          else
                             "unique"
                         )
-                        [ ( "repeat", "Repeat pages" ), ( "unique", "Use each page once" ) ]
+                        [ ( "unique", "Use each page once" ), ( "repeat", "Repeat pages" ) ]
                     , if r.impositionMode == A.ImpositionModeRepeat then
                         if List.length (I.quantities r) == 1 then
                             numberField m "Copies" "copies" (toFloat r.quantityRequested)
 
                         else
-                            div [ class "repeat-quantity-section" ]
-                                [ h3 [] [ text "Copy quantities" ]
-                                , p [] [ text (String.fromInt r.quantityRequested ++ " total impressions") ]
-                                , Button.content [ id "edit-copy-quantities" ] { variant = Button.Secondary, disabled = False, busy = False, className = "ghost-button" } [ text "Edit copy quantities" ] (OpenDialog "quantities")
+                            div [ class "repeat-quantity-section", attribute "aria-label" "Copy quantities" ]
+                                [ span [ class "quantity-summary-label" ] [ text "Copy quantities" ]
+                                , strong [ class "quantity-summary-total" ] [ text (String.fromInt r.quantityRequested ++ " impressions") ]
+                                , p [ class "quantity-summary-detail" ]
+                                    [ text
+                                        (I.quantities r
+                                            |> List.take 4
+                                            |> List.indexedMap
+                                                (\i n ->
+                                                    (if r.sides == A.SidesDouble then
+                                                        "Pages " ++ String.fromInt (i * 2 + 1) ++ "–" ++ String.fromInt (i * 2 + 2)
+
+                                                     else
+                                                        "Page " ++ String.fromInt (i + 1)
+                                                    )
+                                                        ++ ": "
+                                                        ++ String.fromInt n
+                                                )
+                                            |> String.join " · "
+                                        )
+                                    , if List.length (I.quantities r) > 4 then
+                                        text (" · +" ++ String.fromInt (List.length (I.quantities r) - 4) ++ " more")
+
+                                      else
+                                        text ""
+                                    ]
+                                , Button.content [ id "edit-copy-quantities", attribute "aria-label" "Edit copy quantities", attribute "aria-haspopup" "dialog" ] { variant = Button.Quiet, disabled = False, busy = False, className = "quantity-summary-edit" } [ text "Edit" ] (OpenDialog "quantities")
                                 ]
 
                       else
                         text ""
-                    , selectField "Print sheet size"
-                        "sheet"
-                        (if Dict.member "sheet-custom" m.drafts then
-                            "custom"
-
-                         else
-                            sheetName r.parentSheetSize
-                        )
-                        [ ( "12x18", "12 × 18 in" ), ( "8.5x11", "8.5 × 11 in" ), ( "11x17", "11 × 17 in" ), ( "13x19", "13 × 19 in" ), ( "custom", "Custom size" ) ]
+                    , dropdownView (sheetDropdown m)
                     , if Dict.member "sheet-custom" m.drafts || sheetName r.parentSheetSize == "custom" then
                         div [ class "field-grid two" ] [ numberField m "Sheet width (in)" "sheet-width" r.parentSheetSize.width, numberField m "Sheet height (in)" "sheet-height" r.parentSheetSize.height ]
 
                       else
                         text ""
-                    , DaField.select []
-                        (DaField.config "sides" "Printing")
-                        { value =
-                            if r.sides == A.SidesDouble then
-                                "double"
-
-                            else
-                                "single"
-                        , onInput = Field "sides"
-                        , options = [ { value = "single", label = "Single-sided", disabled = False }, { value = "double", label = "Double-sided", disabled = modBy 2 (Maybe.withDefault 1 r.sourcePageCount) /= 0 } ]
-                        }
-                    , h3 [] [ text "Arrangement" ]
-                    , choices "Sheet arrangements"
-                        "layout"
-                        (if r.layoutMode == A.LayoutModeManual then
-                            "manual"
-
-                         else
-                            "maxPieces"
-                        )
-                        [ ( "maxPieces", "Max per sheet" ), ( "manual", "Custom grid" ) ]
-                    , if r.layoutMode == A.LayoutModeManual then
-                        div [ class "field-grid two" ] [ numberField m "Rows" "rows" (toFloat manual.rows), numberField m "Columns" "columns" (toFloat manual.columns) ]
-
-                      else
-                        text ""
+                    , dropdownView (printingDropdown m)
                     , details []
                         [ summary [] [ text "Advanced sheet settings" ]
                         , div [ class "field-grid two" ] [ numberField m "Horizontal gutter (in)" "gutter-horizontal" r.gutter.horizontal, numberField m "Vertical gutter (in)" "gutter-vertical" r.gutter.vertical ]
                         , if r.sides == A.SidesDouble then
                             div []
-                                [ selectField "Duplex flip edge"
-                                    "flip"
-                                    (if duplex.flipEdge == A.DuplexFlipEdgeLongEdge then
-                                        "longEdge"
-
-                                     else
-                                        "shortEdge"
-                                    )
-                                    [ ( "longEdge", "Long edge" ), ( "shortEdge", "Short edge" ) ]
+                                [ dropdownView (flipDropdown m)
                                 , check "Rotate back side 180°" "rotate-back" duplex.rotateBack180
                                 ]
 
@@ -963,30 +1030,37 @@ toolbarView m =
     let
         fit =
             Maybe.withDefault { mode = A.ArtworkFitModeContain, position = { x = 0.5, y = 0.5 } } m.request.artworkFit
+
+        base =
+            Popover.config "impose-presets" "Saved impose settings" "impose-presets-trigger" (SetPresetsOpen False)
+
+        presets =
+            { base | open = m.presetsOpen }
+
+        fitting =
+            DaField.config "fit" "Artwork fitting"
+
+        fittingDescription =
+            "Fit keeps proportions and shows all artwork. Fill keeps proportions and crops to fill the finished size. Stretch scales width and height independently; this can distort artwork."
     in
     section [ class "impose-workspace-toolbar elm-toolbar", attribute "aria-label" "Artwork and sheet preview controls" ]
-        [ div [ class "artwork-fitting", attribute "role" "group", attribute "aria-label" "Artwork fitting" ]
-            (List.map
-                (\( mode, value, ( label, description ) ) ->
-                    Button.content
-                        [ attribute "aria-pressed"
-                            (if fit.mode == mode then
-                                "true"
+        [ div [ class "artwork-fitting", Html.Attributes.title fittingDescription ]
+            [ DaField.segmented []
+                { fitting | disabled = m.busy, description = Just fittingDescription }
+                { value =
+                    case fit.mode of
+                        A.ArtworkFitModeContain ->
+                            "contain"
 
-                             else
-                                "false"
-                            )
-                        , Html.Attributes.title description
-                        ]
-                        { variant = Button.Secondary, disabled = m.busy, busy = False, className = "" }
-                        [ text label ]
-                        (Field "fit" value)
-                )
-                [ ( A.ArtworkFitModeContain, "contain", ( "Fit", "Keep proportions and show all artwork." ) )
-                , ( A.ArtworkFitModeCover, "cover", ( "Fill", "Keep proportions and crop to fill the finished size." ) )
-                , ( A.ArtworkFitModeStretch, "stretch", ( "Stretch", "Scale width and height independently; this can distort artwork." ) )
-                ]
-            )
+                        A.ArtworkFitModeCover ->
+                            "cover"
+
+                        A.ArtworkFitModeStretch ->
+                            "stretch"
+                , onSelect = Field "fit"
+                , options = fieldOptions [ ( "contain", "Fit" ), ( "cover", "Fill" ), ( "stretch", "Stretch" ) ]
+                }
+            ]
         , div [ class "preview-side-controls", attribute "role" "group", attribute "aria-label" "Preview side" ]
             [ if m.request.sides == A.SidesDouble then
                 btn
@@ -1008,9 +1082,9 @@ toolbarView m =
                 , Button.content [ attribute "aria-label" "Next sheet" ] { variant = Button.Secondary, disabled = m.sheet + 1 >= (Maybe.map .sheetsRequired m.layout |> Maybe.withDefault 1), busy = False, className = "ghost-button sheet-nav-button next" } [ span [ class "sheet-nav-label" ] [ text "Next sheet" ] ] (Navigate (m.sheet + 1) m.back)
                 ]
             ]
-        , details [ class "elm-presets-menu artwork-toolbar-disclosure" ]
-            [ summary [ class "ghost-button" ] [ text "Presets" ]
-            , fieldset [ attribute "popover" "manual", attribute "aria-label" "Saved impose settings" ] [ savedView m ]
+        , div [ class "elm-presets-menu" ]
+            [ Popover.trigger [] presets "Presets" (SetPresetsOpen (not m.presetsOpen))
+            , Popover.view [] presets [ savedView m ]
             ]
         ]
 
@@ -1018,9 +1092,7 @@ toolbarView m =
 savedView : Model -> Html Msg
 savedView m =
     div [ class "elm-saved" ]
-        [ DaField.select []
-            (DaField.config "apply-preset" "Apply preset")
-            { value = Maybe.withDefault "" m.editingPreset, onInput = ApplyPreset, options = { value = "", label = "Choose a preset", disabled = False } :: List.map (\p -> { value = p.id, label = p.name, disabled = False }) m.presets }
+        [ dropdownView (presetDropdown m)
         , textField "setup-name" "Setup name" m.savedName (Field "name")
         , div [ class "elm-button-row" ]
             [ btn

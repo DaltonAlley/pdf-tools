@@ -99,6 +99,30 @@ tests =
                 Expect.equal ( { width = 2, height = 3.5 }, True, True )
                     ( after.request.finishedCutSize, after.chosenWidth, after.chosenHeight )
             )
+        , test "Changing sheet size through the dropdown retains finished sizing and fitting"
+            (\_ ->
+                let
+                    before =
+                        initial |> step (Field "finished-width" "5") |> step (Field "finished-height" "7") |> step (Field "fit" "cover")
+
+                    after =
+                        step (DropdownChanged "sheet" "12x18" { state = Dropdown.initial, value = "11x17" }) before
+                in
+                Expect.equal ( { width = 11, height = 17 }, before.request.finishedCutSize, before.request.artworkFit )
+                    ( after.request.parentSheetSize, after.request.finishedCutSize, after.request.artworkFit )
+            )
+        , test "Closing presets clears transient dropdown state and retains layout settings"
+            (\_ ->
+                let
+                    before =
+                        initial |> step (Field "finished-width" "5") |> step (SetPresetsOpen True) |> step (DropdownChanged "apply-preset" "" { state = Dropdown.initial, value = "" })
+
+                    after =
+                        step (SetPresetsOpen False) before
+                in
+                Expect.equal ( ( False, True ), before.request, before.drafts )
+                    ( ( after.presetsOpen, Dict.isEmpty after.dropdowns ), after.request, after.drafts )
+            )
         , test "Setup navigation clears transient dropdown state and preserves inputs"
             (\_ ->
                 let
@@ -557,6 +581,44 @@ tests =
                 in
                 Expect.equal ( request.sourceId, request.impressionQuantities, request.pageOverrides ) ( next.sourceId, next.impressionQuantities, next.pageOverrides )
             )
+        , test "Selecting repeat opens quantities in Sheet without advancing and reopening retains copies"
+            (\_ ->
+                let
+                    r =
+                        I.initial
+
+                    before =
+                        { initial | step = 1, request = { r | sourcePageCount = Just 2 } }
+
+                    opened =
+                        step (Field "mode" "repeat") before
+
+                    edited =
+                        opened |> step (Quantity 0 "7") |> step CloseDialog
+
+                    reopened =
+                        edited |> step (Field "mode" "unique") |> step (Field "mode" "repeat")
+                in
+                Expect.equal ( ( 1, "quantities", Just [ 1, 1 ] ), ( 1, "quantities", Just [ 7, 1 ] ) )
+                    ( ( opened.step, opened.dialog, opened.request.impressionQuantities ), ( reopened.step, reopened.dialog, reopened.request.impressionQuantities ) )
+            )
+        , test "Repeat opens quantities for a single page and for duplex pairs"
+            (\_ ->
+                let
+                    r =
+                        I.initial
+
+                    single =
+                        step (Field "mode" "repeat") { initial | request = { r | sourcePageCount = Just 1 } }
+
+                    duplex =
+                        { initial | request = { r | sourcePageCount = Just 4 } }
+                            |> step (Field "sides" "double")
+                            |> step (Field "mode" "repeat")
+                in
+                Expect.equal ( ( "quantities", [ 1 ] ), ( "quantities", [ 1, 1 ] ) )
+                    ( ( single.dialog, I.quantities single.request ), ( duplex.dialog, I.quantities duplex.request ) )
+            )
         , test "Simplex and duplex quantity drafts survive mode changes"
             (\_ ->
                 let
@@ -640,7 +702,7 @@ tests =
                 in
                 Expect.equal ( True, "" ) ( late.busy, late.error )
             )
-        , test "A duplex preset restores printing choices while retaining simplex quantities"
+        , test "A duplex preset selected from the dropdown retains simplex quantities and printing choices"
             (\_ ->
                 case RustWire.cases |> List.filter (\( name, _ ) -> name == "GangUpPreset") |> List.head |> Maybe.andThen (Tuple.second >> D.decodeString A.gangUpPresetDecoder >> Result.toMaybe) of
                     Nothing ->
@@ -655,12 +717,13 @@ tests =
                                 { initial | presets = [ p ], request = { r | sourceId = Just "retained-source", sourcePageCount = Just 4, impositionMode = A.ImpositionModeRepeat, impressionQuantities = Just [ 2, 0, 4, 1 ], quantityRequested = 7 } }
 
                             applied =
-                                step (ApplyPreset p.id) working
+                                step (DropdownChanged "apply-preset" "" { state = Dropdown.initial, value = p.id }) working
 
                             restored =
                                 step (Field "sides" "single") applied
                         in
-                        Expect.equal ( A.SidesDouble, Just "retained-source", Just [ 2, 0, 4, 1 ] ) ( applied.request.sides, applied.request.sourceId, restored.request.impressionQuantities )
+                        Expect.equal ( ( A.SidesDouble, Just "retained-source", Just [ 2, 0, 4, 1 ] ), working.dialog )
+                            ( ( applied.request.sides, applied.request.sourceId, restored.request.impressionQuantities ), applied.dialog )
             )
         , test "Duplex preview pages use ordered pairs and stop at empty positions"
             (\_ ->

@@ -172,12 +172,46 @@ guides m display =
                     )
 
         outlined shape cls attrs =
-            [ shape (SA.class "preview-guide preview-guide-halo" :: attrs) []
+            [ shape (SA.class ("preview-guide preview-guide-halo " ++ cls ++ "-halo") :: attrs) []
             , shape (SA.class ("preview-guide " ++ cls) :: attrs) []
             ]
+
+        bleeds =
+            display.layout.placements
+                |> List.filterMap
+                    (\item ->
+                        I.pageNumber display.layout display.sheet display.back item.index
+                            |> Maybe.andThen
+                                (\page ->
+                                    let
+                                        amount =
+                                            display.layout.pagePlans
+                                                |> List.filter (\plan -> plan.pageNumber == page)
+                                                |> List.head
+                                                |> Maybe.map .bleedAmount
+                                                |> Maybe.withDefault display.layout.bleed.effectiveAmountPerSide
+
+                                        cut =
+                                            finishedCut display item
+                                    in
+                                    if amount > 0 then
+                                        Just
+                                            (outlined S.rect
+                                                "piece-bleed-bound"
+                                                (rectGeometry { x = cut.x - amount, y = cut.y - amount, width = cut.width + 2 * amount, height = cut.height + 2 * amount }
+                                                    ++ [ H.attribute "data-impression-index" (String.fromInt item.index), H.attribute "data-bleed-amount" (f amount) ]
+                                                )
+                                            )
+
+                                    else
+                                        Nothing
+                                )
+                    )
+                |> List.concat
     in
     S.g [ SA.class "sheet-guides", H.attribute "aria-hidden" "true" ]
-        (List.concatMap (outlined S.line "piece-cut-path") (horizontal ++ vertical)
+        (bleeds
+            ++ List.concatMap (outlined S.line "piece-cut-path") (horizontal ++ vertical)
             ++ selected
         )
 

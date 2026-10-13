@@ -136,6 +136,16 @@ class Workflow:
     def button(self, name):
         return self.page.get_by_role('button', name=name, exact=True).or_(self.page.get_by_role('radio', name=name, exact=True))
 
+    def dropdown(self, name, value):
+        labels = {
+            '12x18': '12 × 18 in', '8.5x11': '8.5 × 11 in',
+            '11x17': '11 × 17 in', '13x19': '13 × 19 in', 'custom': 'Custom size',
+            'single': 'Single-sided', 'double': 'Double-sided',
+            'longEdge': 'Long edge', 'shortEdge': 'Short edge',
+        }
+        self.page.get_by_role('combobox', name=name, exact=True).click()
+        self.page.get_by_role('option', name=labels.get(value, value), exact=True).click()
+
     def switch(self, name):
         self.page.get_by_role('combobox', name='Tool', exact=True).click()
         self.page.get_by_role('option', name=name, exact=True).click()
@@ -143,10 +153,16 @@ class Workflow:
     def select(self, files):
         if isinstance(files, pathlib.Path):
             files = [files]
-        name = 'Browse files' if self.button('Browse files').count() else (
-            'Replace artwork' if self.button('Replace artwork').count() else 'Replace files')
+        if self.button('Browse files').count():
+            trigger = self.button('Browse files')
+        else:
+            workspace = self.button('Workspace')
+            if workspace.get_attribute('aria-expanded') != 'true':
+                workspace.click()
+            name = 'Replace artwork' if self.page.locator('.ready-card.imposing').count() else 'Replace files'
+            trigger = self.page.get_by_role('menuitem', name=name, exact=True)
         with self.page.expect_file_chooser() as chooser:
-            self.button(name).click()
+            trigger.click()
         chooser.value.set_files([str(path) for path in files])
         self.idle()
 
@@ -269,17 +285,17 @@ class Workflow:
 
     def merge(self, fixtures):
         self.select([f[0] for f in fixtures])
-        self.button('Combine PDFs').click()
-        self.button('Move third.pdf up').click()
+        self.switch('Combine PDFs')
+        self.button('Move up: third.pdf').click()
         self.idle()
-        expect(self.page.locator('.file-meta > span')).to_have_text(['first.pdf', 'third.pdf', 'second.pdf'])
-        self.button('Move third.pdf up').press('Enter')
+        expect(self.page.locator('.da-file-list__name')).to_have_text(['first.pdf', 'third.pdf', 'second.pdf'])
+        self.button('Move up: third.pdf').press('Enter')
         self.idle()
-        expect(self.page.locator('.file-meta > span')).to_have_text(['third.pdf', 'first.pdf', 'second.pdf'])
+        expect(self.page.locator('.da-file-list__name')).to_have_text(['third.pdf', 'first.pdf', 'second.pdf'])
         ordered = [fixtures[2], fixtures[0], fixtures[1]]
         path = self.download('Download PDF', 'merge.pdf')
         self.pdf_output(path, [l for f in ordered for l in f[1]], [s for f in ordered for s in f[2]])
-        self.button('Remove first.pdf').click()
+        self.button('Remove: first.pdf').click()
         path = self.download('Download PDF', 'merge-removed.pdf')
         self.pdf_output(path, ordered[0][1] + ordered[2][1], ordered[0][2] + ordered[2][2])
 
@@ -299,7 +315,7 @@ class Workflow:
                             assert image.format == format_name
                             assert abs(image.width - round(size[0] * factor)) <= 1
                             assert abs(image.height - round(size[1] * factor)) <= 1
-        self.button('Extract pages').click()
+        self.switch('Extract pages')
         self.range('2')
         self.button('Combined').click()
         output = self.download('Download PDF', 'one-extracted.pdf')
@@ -316,12 +332,12 @@ class Workflow:
 
     def image_order(self, fixtures):
         self.select([f[0] for f in fixtures[:3]])
-        self.button('Move transparent.png up').click()
+        self.button('Move up: transparent.png').click()
         self.idle()
-        expect(self.page.locator('.file-meta > span')).to_have_text(['opaque.png', 'transparent.png', 'opaque.jpg'])
-        self.button('Move transparent.png up').press('Enter')
+        expect(self.page.locator('.da-file-list__name')).to_have_text(['opaque.png', 'transparent.png', 'opaque.jpg'])
+        self.button('Move up: transparent.png').press('Enter')
         self.idle()
-        expect(self.page.locator('.file-meta > span')).to_have_text(['transparent.png', 'opaque.png', 'opaque.jpg'])
+        expect(self.page.locator('.da-file-list__name')).to_have_text(['transparent.png', 'opaque.png', 'opaque.jpg'])
         output = self.download('Create PDF', 'ordered-images.pdf')
         with fitz.open(output) as doc:
             assert len(doc) == 3
@@ -329,7 +345,7 @@ class Workflow:
             for page, fixture in zip(doc, expected):
                 assert abs(page.rect.width - fixture[1][0] * 72 / 300) < .01
                 assert abs(page.rect.height - fixture[1][1] * 72 / 300) < .01
-        self.button('Remove opaque.png').click()
+        self.button('Remove: opaque.png').click()
         output = self.download('Create PDF', 'removed-image.pdf')
         with fitz.open(output) as doc:
             assert len(doc) == 2
@@ -342,12 +358,15 @@ class Workflow:
         self.page.locator('#finished-height').fill('2')
         self.step('Sheet')
         self.button('Repeat pages').click()
-        self.page.get_by_label('Copies', exact=True).fill('5')
-        self.page.get_by_label('Print sheet size', exact=True).select_option(sheet)
+        expect(self.page.locator('#workspace-dialog')).to_be_visible()
+        self.page.locator('#bulk-copy-quantity').fill('5')
+        self.button('Apply to all').click()
+        self.idle()
+        self.dropdown('Print sheet size', sheet)
         if sheet == 'custom':
             self.page.get_by_label('Sheet width (in)', exact=True).fill('10')
             self.page.get_by_label('Sheet height (in)', exact=True).fill('14')
-        self.step('Sheet')
+        self.step('Size')
         self.button('Custom grid').click()
         self.page.get_by_label('Rows', exact=True).fill('1')
         self.page.get_by_label('Columns', exact=True).fill('2')
@@ -378,13 +397,14 @@ class Workflow:
         self.page.locator('#finished-width').fill('3')
         self.page.locator('#finished-height').fill('2')
         self.step('Sheet')
-        self.page.get_by_label('Printing', exact=True).select_option('double')
-        self.step('Sheet')
+        self.dropdown('Printing', 'double')
+        self.step('Size')
         self.button('Custom grid').click()
         self.page.get_by_label('Rows', exact=True).fill('1')
         self.page.get_by_label('Columns', exact=True).fill('2')
+        self.step('Sheet')
         self.page.get_by_text('Advanced sheet settings', exact=True).click()
-        self.page.get_by_label('Duplex flip edge', exact=True).select_option(edge)
+        self.dropdown('Duplex flip edge', edge)
         self.page.get_by_label('Rotate back side 180°', exact=True).set_checked(rotate)
         self.idle()
         self.step('Bleed')
@@ -418,7 +438,7 @@ class Workflow:
                     line = next(line for block in page.get_text('dict')['blocks'] if 'lines' in block
                                 for line in block['lines'] if any(label in s['text'] for s in line['spans']))
                     source_rotation = (0, 90, 0, 270)[source_index]
-                    angle = math.radians(source_rotation + (180 if side and rotate else 0))
+                    angle = math.radians(source_rotation + layout['rotationDegrees'] + (180 if side and rotate else 0))
                     assert abs(line['dir'][0] - math.cos(angle)) < .001, line
                     assert abs(line['dir'][1] - math.sin(angle)) < .001, line
         assert layout['duplex']['flipEdge'] == edge
@@ -464,7 +484,10 @@ class Workflow:
         expect(self.page.locator('#finished-height')).to_have_value(str(finished[1]).removesuffix('.0'))
         self.step('Sheet')
         self.button('Repeat pages').click()
-        self.page.get_by_label('Copies', exact=True).fill('2')
+        expect(self.page.locator('#workspace-dialog')).to_be_visible()
+        self.page.locator('#bulk-copy-quantity').fill('2')
+        self.button('Apply to all').click()
+        self.idle()
         self.idle()
         self.step('Bleed')
         output = self.download('Download imposed PDF', 'menu-two-up.pdf')
