@@ -4,7 +4,6 @@ import Api.Generated as A
 import Browser
 import Da.Reorderable as Reorderable
 import Dict
-import ElmBrowser
 import File
 import File.Download
 import File.Select
@@ -25,12 +24,6 @@ port resources : E.Value -> Cmd msg
 
 
 port browserEvents : (D.Value -> msg) -> Sub msg
-
-
-port browserRequest : E.Value -> Cmd msg
-
-
-port browserResponse : (D.Value -> msg) -> Sub msg
 
 
 main : Program String Model Msg
@@ -105,7 +98,7 @@ init theme =
 
 subscriptions : Model -> Sub Msg
 subscriptions m =
-    Sub.batch [ browserEvents BrowserEvent, browserResponse SharedBrowserResponse, Time.every (10 * 60 * 1000) Lease, Http.track "job-upload" Uploaded, View.dropdownSubscriptions m ]
+    Sub.batch [ browserEvents BrowserEvent, Time.every (10 * 60 * 1000) Lease, Http.track "job-upload" Uploaded, View.dropdownSubscriptions m ]
 
 
 bridge : String -> List ( String, E.Value ) -> Cmd Msg
@@ -778,11 +771,7 @@ updateInternal msg m =
                         else
                             ( { next | source = Nothing, display = Nothing, layout = Nothing, layoutReady = False }, Cmd.batch [ Http.cancel "layout", bridge "clearPreviews" [], Maybe.map (.sourceId >> (\id -> delete ("gang-up/sources/" ++ id))) m.source |> Maybe.withDefault Cmd.none ] )
                 in
-                if op == Impose || m.operation == Impose then
-                    ( updated, Cmd.batch [ bridge "workspaceTransition" [], cmd ] )
-
-                else
-                    ( updated, cmd )
+                ( updated, Cmd.batch [ bridge "workspaceTransition" [], cmd ] )
 
         Field key value ->
             field key value m
@@ -1143,14 +1132,6 @@ updateInternal msg m =
 
                     Ok layout ->
                         preview { m | layout = Just layout, layoutReady = True, error = "", sheet = min m.sheet (max 0 (layout.sheetsRequired - 1)), retryKind = "" }
-
-        SharedBrowserResponse value ->
-            case ElmBrowser.decode value of
-                Ok (ElmBrowser.Failed "theme" _) ->
-                    ( { m | notice = "Theme changed for this tab. Your browser could not save the preference." }, Cmd.none )
-
-                _ ->
-                    ( m, Cmd.none )
 
         BrowserEvent event ->
             browserEvent event m
@@ -1681,21 +1662,7 @@ toggle key m =
                         "dark"
             in
             ( { m | theme = theme }
-            , Cmd.batch
-                [ bridge "theme" [ ( "value", E.string theme ) ]
-
-                -- Keep the existing raw-string preference readable by older builds.
-                , browserRequest
-                    (E.object
-                        [ ( "version", E.int 1 )
-                        , ( "id", E.string "theme" )
-                        , ( "action", E.string "storage.set" )
-                        , ( "session", E.bool False )
-                        , ( "key", E.string "theme" )
-                        , ( "value", E.string theme )
-                        ]
-                    )
-                ]
+            , bridge "theme" [ ( "value", E.string theme ) ]
             )
 
         "per-artwork" ->
@@ -1928,6 +1895,9 @@ browserEvent event m =
 
         "theme" ->
             ( { m | theme = get "value" D.string m.theme }, Cmd.none )
+
+        "themeStorageError" ->
+            ( { m | notice = "Theme changed for this tab. Your browser could not save the preference." }, Cmd.none )
 
         "artworkMenu" ->
             let

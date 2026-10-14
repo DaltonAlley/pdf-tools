@@ -162,7 +162,7 @@ tests =
                     ]
                     ()
             )
-        , test "Shared storage failure keeps the chosen theme and reports that it was not saved"
+        , test "Storage failure keeps the chosen theme and reports that it was not saved"
             (\_ ->
                 let
                     changed =
@@ -170,22 +170,18 @@ tests =
 
                     failed =
                         step
-                            (SharedBrowserResponse
+                            (BrowserEvent
                                 (E.object
-                                    [ ( "version", E.int 1 )
-                                    , ( "id", E.string "theme" )
-                                    , ( "kind", E.string "error" )
-                                    , ( "message", E.string "Storage unavailable" )
-                                    ]
+                                    [ ( "action", E.string "themeStorageError" ) ]
                                 )
                             )
                             changed
                 in
                 Expect.equal ( "dark", False, "" ) ( failed.theme, String.isEmpty failed.notice, failed.error )
             )
-        , test "Malformed shared browser responses preserve application state"
+        , test "Malformed browser events preserve application state"
             (\_ ->
-                Expect.equal initial (step (SharedBrowserResponse E.null) initial)
+                Expect.equal initial (step (BrowserEvent E.null) initial)
             )
         , test "Dismissing an error toast retains the failed request and retry state"
             (\_ ->

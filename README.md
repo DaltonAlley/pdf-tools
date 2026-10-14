@@ -1,8 +1,8 @@
 # PDF Tools
 
 PDF Tools is a self-hosted web app with a Rust backend and Elm frontend, started
-in the browser by the shared OCaml `elm-browser` library also used by Squire. It
-turns PDF pages into PNG or JPEG images, extracts selected pages as individual
+in the browser by a small plain JavaScript bootstrap. It turns PDF pages into
+PNG or JPEG images, extracts selected pages as individual
 PDFs in a ZIP, merges PDFs, converts ordered PNG or JPEG images into a PDF, and
 imposes artwork onto print sheets.
 
@@ -120,8 +120,7 @@ from the repository instead, `PDF_APP_VERSION` defaults to `0.2.17` and can be s
 in `.env` to select another published version.
 
 To build locally instead, clone <https://github.com/theupsstore7452/pdf-tools>
-with `--recurse-submodules` (or run `git submodule update --init --recursive`), enter
-its repository root, and run:
+and enter its repository root, then run:
 
 ```sh
 docker compose up -d --build --wait
@@ -247,8 +246,7 @@ just dev
 `nix develop .#commands` provides the lightweight container command tools.
 Use the default shell for `just dev`, `just check`, and source builds.
 
-Without Nix, install Rust with Clippy and rustfmt, Node, PDFium, OCaml, Dune,
-and `js_of_ocaml`. Set
+Without Nix, install Rust with Clippy and rustfmt, Node, and PDFium. Set
 `PDF_TOOLS_PDFIUM_PATH=/path/to/libpdfium.so` if PDFium is not on the library path.
 `just dev` installs the pinned npm dependencies, generates the API codecs, builds
 the frontend, starts Axum on <http://127.0.0.1:3200>, and watches frontend files.
@@ -275,8 +273,9 @@ frontend uses relative API URLs and works on ordinary HTTP origins without
 `crypto.randomUUID`, clipboard permissions, or a secure context.
 
 Elm owns workflow state, files, HTTP uploads, validation, polling, and stale
-response rejection. The shared `elm-browser` OCaml library mounts the app and
-handles theme storage. The [PDF browser adapter](frontend/bridge.js) manages
+response rejection. The [JavaScript bootstrap](frontend/browser/bootstrap.js)
+mounts the app and checks its resource ports. The
+[PDF browser adapter](frontend/bridge.js) handles theme storage and manages
 binary preview blobs, object URLs, downloads, native dialog focus, and
 crop pointer events. Rust remains authoritative for production geometry. See
 [frontend implementation notes](frontend/README.md) for resource lifecycles and

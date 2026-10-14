@@ -398,7 +398,7 @@ class Suite:
         expect(self.page.locator('.da-reorderable__item')).to_have_count(2)
         self.select([stripe, small_jpeg])
         self.idle()
-        expect(self.button('Images to PDF')).to_be_visible()
+        expect(self.page.get_by_role('combobox', name='Tool', exact=True)).to_contain_text('Images to PDF')
         self.button('Move small.jpg up').click()
         path = self.download('Create PDF', 'images.pdf')
         with fitz.open(path) as document:
@@ -1816,7 +1816,7 @@ class Suite:
         self.page.unroute('**/elm.js')
         expect(self.button('Browse files')).to_be_visible()
         # Loaded code can still lack Elm.Main or the required bridge ports.
-        # Both library failures must reach the same Retry interface.
+        # Both bootstrap failures must reach the same Retry interface.
         for body in ['window.Elm = {};', 'window.Elm = {Main: {init: () => ({ports: {}})}};']:
             self.page.route('**/elm.js', lambda route: route.fulfill(status=200, content_type='text/javascript', body=body))
             self.page.goto(args.url)
@@ -1824,7 +1824,7 @@ class Suite:
             self.page.unroute('**/elm.js')
             self.page.locator('#startup-retry').click()
             expect(self.button('Browse files')).to_be_visible()
-        self.checks.append('startup: CSS, Elm, OCaml bootstrap, and resource bridge failure + retry; missing Elm module/ports recovery')
+        self.checks.append('startup: CSS, Elm, JavaScript bootstrap, and resource bridge failure + retry; missing Elm module/ports recovery')
 
     def finish(self):
         assert not self.errors, self.errors

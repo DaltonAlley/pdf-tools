@@ -121,10 +121,6 @@
 
         pdf-app = (mkShell ([ pkgs.rustup rust197 ] ++ (with pkgs; [
           nodejs
-          dune_3
-          ocamlPackages.ocaml
-          ocamlPackages.findlib
-          ocamlPackages.js_of_ocaml
           (python3.withPackages (ps: [ ps.playwright ps.pymupdf ps.pillow ]))
           playwright-driver.browsers
           clang
@@ -137,7 +133,6 @@
           pkg-config
           util-linux
         ]) ++ [ pinnedNextest pinnedPdfium ])).overrideAttrs (_: {
-          buildInputs = [ pkgs.ocamlPackages.js_of_ocaml ];
           PLAYWRIGHT_BROWSERS_PATH = "${pkgs.playwright-driver.browsers}";
           PDF_TOOLS_PDFIUM_PATH = "${pinnedPdfium}/lib/libpdfium.so";
           AGENT_BROWSER_EXECUTABLE_PATH = "${pkgs.chromium}/bin/chromium";
