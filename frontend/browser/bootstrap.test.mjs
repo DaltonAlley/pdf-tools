@@ -19,6 +19,7 @@ function browser(theme = 'dark') {
   const context = {
     document: {getElementById: () => node, documentElement: {dataset: {theme}}, addEventListener() {}},
     window: {addEventListener() {}},
+    matchMedia: () => ({addEventListener() {}}),
     install() {},
     Elm: {Main: {init: options => { initialized.push(options); return app; }}},
     localStorage: {setItem: (key, value) => writes.push([key, value])},
