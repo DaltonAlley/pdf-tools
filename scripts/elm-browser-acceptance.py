@@ -186,7 +186,7 @@ class Suite:
         self.select(three)
         self.idle()
         expect(self.page.locator('.app-file-context')).to_have_count(0)
-        expect(self.page.locator('.app-header-actions > button')).to_have_count(2)
+        expect(self.page.locator('.app-header-actions #workspace-actions-trigger, .app-header-actions .da-theme-toggle')).to_have_count(2)
         trigger = self.button('Workspace')
         toggle = self.page.get_by_role('switch', name='Dark mode')
         expect(toggle).to_be_visible()
