@@ -81,7 +81,7 @@ File objects for Elm's decoder. It contains no PDF processing or layout solver.
 
 ## Verification
 
-`npm test` covers validation, state transitions and wire contracts. Python
+`npm test` covers bootstrap startup/storage, validation, state transitions and wire contracts. Python
 Playwright scripts under `scripts/` exercise the real backend in Chromium and
 Firefox, inspecting output PDFs/images with PyMuPDF/Pillow. They also test
 controlled failure recovery, insecure HTTP, preview batches, keyboard focus and

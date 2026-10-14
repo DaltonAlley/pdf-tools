@@ -116,7 +116,7 @@ No source checkout is required. Private packages require a registry login;
 an administrator can enable anonymous pulls by setting package visibility to
 Public. The
 release attachment pins that release's immutable image digest. If using the Compose file
-from the repository instead, `PDF_APP_VERSION` defaults to `0.2.17` and can be set
+from the repository instead, `PDF_APP_VERSION` defaults to `0.2.18` and can be set
 in `.env` to select another published version.
 
 To build locally instead, clone <https://github.com/theupsstore7452/pdf-tools>
@@ -216,6 +216,11 @@ in its package settings. New GHCR packages are private by default, even for a
 public repository. The OCI source label links the package to this repository.
 
 ## Build from source
+
+The browser bootstrap is ordinary JavaScript at `frontend/browser/bootstrap.js`.
+CI and Docker build it with the Elm frontend using Node and the pinned npm
+dependencies. The frontend build checks its syntax and includes its contents in
+the versioned asset hash.
 
 The source-build command above runs from the standalone repository root and
 requires only Docker. For the pinned development shell and full checks, run from

@@ -7,7 +7,7 @@ export function start(connect) {
   }
   const app = globalThis.Elm.Main.init({
     node,
-    flags: document.documentElement.dataset.theme || 'dark'
+    flags: document.documentElement.dataset.theme === 'light' ? 'light' : 'dark'
   });
   if (typeof app?.ports?.resources?.subscribe !== 'function' ||
       typeof app?.ports?.browserEvents?.send !== 'function') {

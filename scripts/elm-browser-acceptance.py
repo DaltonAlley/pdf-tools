@@ -149,6 +149,19 @@ class Suite:
         expect(self.page.locator('[data-layout-state=pending]')).to_have_count(0, timeout=60000)
         expect(self.page.locator('.preview-cache-status').filter(has_text='Updating preview')).to_have_count(0, timeout=60000)
 
+    def close_quantities(self):
+        self.button('Done').click()
+        expect(self.page.locator('#workspace-dialog')).to_have_count(0)
+        self.idle()
+
+    def wait_pending(self, pending):
+        deadline = time.monotonic() + 15
+        while not pending and time.monotonic() < deadline:
+            # Yield to Playwright's route handlers until the real backend has
+            # returned the response this recovery test is deliberately holding.
+            self.page.wait_for_timeout(20)
+        assert pending, 'Expected a held backend response before cancellation'
+
     def download(self, name, output):
         self.idle()
         with self.page.expect_download(timeout=60000) as download:
@@ -273,17 +286,27 @@ class Suite:
         self.page.locator('#finished-width').fill('3')
         self.page.locator('#finished-height').fill('2')
         self.idle()
-        expect(self.page.locator('.sheet-svg')).to_be_visible()
+        if self.page.viewport_size['width'] > 1100:
+            expect(self.page.locator('.sheet-svg')).to_be_visible()
+        else:
+            # The mobile Setup tab intentionally hides the ready preview.
+            expect(self.page.locator('.sheet-svg')).to_be_attached()
 
     def continue_to(self, step):
         self.step(step)
         self.idle()
 
     def step(self, name):
-        self.page.locator('.setup-stepper').get_by_role('tab', name=name, exact=True).click()
+        tab = self.page.locator('.setup-stepper').get_by_role('tab', name=name, exact=True)
+        tab.click()
+        # Step navigation restores focus on the next animation frame. Opening a
+        # popover before that completes makes its normal outside-focus handler
+        # close it again. Wait for rendering, without waiting for layout work.
+        self.page.evaluate('() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+        expect(tab).to_be_focused()
 
     def dropdown(self, name, value):
-        if name == 'Apply preset':
+        if name == 'Apply preset' and not self.page.locator('.elm-presets-menu .da-popover').is_visible():
             self.presets()
         labels = {
             '12x18': '12 × 18 in', '8.5x11': '8.5 × 11 in',
@@ -313,12 +336,14 @@ class Suite:
             trigger.click()
         menu = self.page.locator('.elm-presets-menu')
         expect(menu.locator('.da-popover')).to_be_visible()
+        expect(trigger).to_have_attribute('aria-expanded', 'true')
         return menu
 
     def close_presets(self):
         trigger = self.page.get_by_role('button', name='Presets', exact=True)
         if trigger.get_attribute('aria-expanded') == 'true':
             trigger.click()
+        expect(self.page.locator('.elm-presets-menu .da-popover')).to_be_hidden()
 
     def assert_pdf(self, path, labels, sizes=None):
         with fitz.open(path) as document:
@@ -398,7 +423,7 @@ class Suite:
         expect(self.page.locator('.da-reorderable__item')).to_have_count(2)
         self.select([stripe, small_jpeg])
         self.idle()
-        expect(self.page.get_by_role('combobox', name='Tool', exact=True)).to_contain_text('Images to PDF')
+        expect(self.page.get_by_role('combobox', name='Tool', exact=True)).to_have_text('Images to PDF')
         self.button('Move small.jpg up').click()
         path = self.download('Create PDF', 'images.pdf')
         with fitz.open(path) as document:
@@ -506,8 +531,8 @@ class Suite:
         self.page.route('**/pdf/inspect', lambda route: pending.append((route, route.fetch())))
         self.select(three)
         self.button('Cancel inspection').wait_for()
+        self.wait_pending(pending)
         self.button('Cancel inspection').click()
-        assert pending
         for route, response in pending:
             try: route.fulfill(response=response)
             except Exception: pass  # A native Elm Http.cancel may have already aborted it.
@@ -528,6 +553,7 @@ class Suite:
         pending = []
         self.page.route('**/jobs', lambda route: pending.append((route,route.fetch())))
         self.button('Download images').click()
+        self.wait_pending(pending)
         self.button('Cancel').click()
         for route,response in pending: route.fulfill(response=response)
         self.page.unroute('**/jobs')
@@ -574,7 +600,7 @@ class Suite:
         self.idle()
         expect(self.page.locator('#finished-width')).to_have_value('3')
         expect(self.page.locator('#finished-height')).to_have_value('2')
-        expect(self.page.get_by_label('Finished orientation',exact=True)).to_be_enabled()
+        expect(self.page.get_by_role('combobox', name='Finished orientation', exact=True)).to_be_enabled()
         self.page.locator('#finished-width').fill('3')
         self.page.locator('#finished-height').fill('2')
         orientation = self.page.get_by_role('combobox', name='Finished orientation', exact=True)
@@ -621,7 +647,7 @@ class Suite:
         self.idle()
         expect(self.page.locator('#finished-width')).to_have_value('5')
         expect(self.page.locator('#finished-height')).to_have_value('7')
-        expect(self.page.get_by_label('Finished orientation', exact=True)).to_have_value('portrait')
+        expect(self.page.get_by_role('combobox', name='Finished orientation', exact=True)).to_have_text('Portrait')
         assert self.layouts[-1]['finishedCutSize'] == {'width': 5, 'height': 7}
         self.step('Bleed')
         path = self.download('Download imposed PDF', 'autofilled-5x7.pdf')
@@ -815,7 +841,8 @@ class Suite:
                     assert abs(tabs['y'] - toolbar['y']) < 1, (theme, width, tabs, toolbar)
                     assert abs(tabs['y'] + tabs['height'] - toolbar['y'] - toolbar['height']) < 1
                     assert abs(tabs['x'] - setup['x']) < 1
-                    assert abs(tabs['x'] + tabs['width'] - toolbar['x']) < 1
+                    side_border = self.page.locator('.elm-setup').evaluate('e => parseFloat(getComputedStyle(e).borderRightWidth)')
+                    assert abs(tabs['x'] + tabs['width'] + side_border - toolbar['x']) < 1
                 rows = self.page.locator('.impose-artwork-files .da-reorderable__item')
                 expect(rows).to_have_count(3)
                 dimensions = rows.evaluate_all('''rows => rows.map(row => {
@@ -930,7 +957,7 @@ class Suite:
                 self.step('Sheet')
                 self.button('Repeat pages').click()
                 expect(self.page.locator('#workspace-dialog')).to_be_visible()
-                self.button('Done').click()
+                self.close_quantities()
                 opener = self.button('Edit copy quantities')
                 for printing, quantities in [('single', [3] * 6), ('double', [3] * 3)]:
                     self.dropdown('Printing', printing)
@@ -1002,7 +1029,7 @@ class Suite:
         self.impose(stripe)
         self.step('Sheet')
         self.button('Repeat pages').click()
-        self.button('Done').click()
+        self.close_quantities()
         self.page.get_by_label('Copies', exact=True).fill('61')
         self.idle()
         toolbar = self.page.locator('.elm-toolbar')
@@ -1100,7 +1127,7 @@ class Suite:
         self.impose(stripe)
         self.step('Sheet')
         self.button('Repeat pages').click()
-        self.button('Done').click()
+        self.close_quantities()
         self.page.get_by_label('Copies', exact=True).fill('61')
         self.idle()
         menu = self.page.locator('.elm-presets-menu')
@@ -1119,9 +1146,11 @@ class Suite:
         ]
         for label, width, height, rows, columns, save_step in workflows:
             self.step('Size')
+            self.button('Max per sheet').click()
             self.page.locator('#finished-width').fill(str(width))
             self.page.locator('#finished-height').fill(str(height))
-            self.step('Size')
+            # Custom grid seeds its rotation from the current automatic layout.
+            self.idle()
             self.button('Custom grid').click()
             self.page.get_by_label('Rows', exact=True).fill(str(rows))
             self.page.get_by_label('Columns', exact=True).fill(str(columns))
@@ -1142,7 +1171,7 @@ class Suite:
         self.impose(stripe)
         self.step('Sheet')
         self.button('Repeat pages').click()
-        self.button('Done').click()
+        self.close_quantities()
         self.page.get_by_label('Copies', exact=True).fill('61')
         for preset_id, expected, load_step in presets:
             self.step(load_step)
@@ -1229,7 +1258,7 @@ class Suite:
         assert self.layouts[-1]['impressionQuantities']==[2]*6
         self.button('Edit copy quantities').click()
         self.page.get_by_label('Page 2 copies',exact=True).fill('0')
-        self.button('Done').click()
+        self.close_quantities()
         self.idle()
         assert self.layouts[-1]['impressionQuantities']==[2,0,2,2,2,2]
         self.dropdown('Printing', 'double')
@@ -1332,7 +1361,7 @@ class Suite:
         self.page.locator('#finished-height').fill('11')
         self.step('Sheet')
         self.button('Repeat pages').click()
-        self.button('Done').click()
+        self.close_quantities()
         self.page.get_by_label('Copies',exact=True).fill('2')
         self.idle()
         first = self.page.locator('#sheet-item-0')
@@ -1361,21 +1390,20 @@ class Suite:
           for (const key of ['x','y','width','height']) if (hit.getAttribute(key) !== e.getAttribute(key)) throw new Error('Selection does not match selected cut');
           return {outline:getComputedStyle(item).outlineStyle, stroke:style.strokeWidth, effect:style.vectorEffect, color:style.stroke, dash:style.strokeDasharray};
         }''')
-        dark = self.page.locator('html').get_attribute('data-theme') == 'dark'
-        assert style == {'outline':'none','stroke':'2.5px','effect':'non-scaling-stroke','color':'rgb(237, 237, 237)' if dark else 'rgb(32, 32, 32)','dash':'none'}, style
+        assert style == {'outline':'none','stroke':'2.5px','effect':'non-scaling-stroke','color':'rgb(37, 99, 235)','dash':'none'}, style
         halo = self.page.locator('.piece-selection-halo')
-        assert halo.evaluate('e => getComputedStyle(e).stroke') == ('rgb(23, 23, 23)' if dark else 'rgb(255, 255, 255)')
+        assert halo.evaluate('e => getComputedStyle(e).stroke') == 'rgb(255, 255, 255)'
         expect(selection).to_have_count(1)
         expect(self.page.locator('.piece-selection-halo')).to_have_count(1)
         assert self.page.locator('.sheet-item[data-selected=true]').count() == 1
         self.page.screenshot(path=str(self.out/'impression-selection.png'))
         self.toggle_theme()
         second.focus()
-        expect(selection).to_have_css('stroke', 'rgb(32, 32, 32)' if dark else 'rgb(237, 237, 237)')
-        expect(halo).to_have_css('stroke', 'rgb(255, 255, 255)' if dark else 'rgb(23, 23, 23)')
+        expect(selection).to_have_css('stroke', 'rgb(37, 99, 235)')
+        expect(halo).to_have_css('stroke', 'rgb(255, 255, 255)')
         self.page.screenshot(path=str(self.out/'impression-selection-light.png'))
         self.toggle_theme()
-        self.checks.append('impression selection: one selected repeated copy, pointer/keyboard/open context menu and focus return, neutral 2.5px outline with contrasting border in both themes, exact cut geometry, no native SVG focus ring, light/dark screenshots')
+        self.checks.append('impression selection: one selected repeated copy, pointer/keyboard/open context menu and focus return, blue 2.5px outline with contrasting border in both themes, exact cut geometry, no native SVG focus ring, light/dark screenshots')
 
 
 
@@ -1541,8 +1569,7 @@ class Suite:
         self.page.locator('.bleed-status').click()
         self.page.get_by_label('PDF bleed per side (in)',exact=True).fill('0.125')
         self.button('Use auto-detected bleed').wait_for()
-        self.page.wait_for_timeout(350)
-        assert pending
+        self.wait_pending(pending)
         current=self.page.locator('.sheet-svg image').first.get_attribute('href') or self.page.locator('.sheet-svg image').first.get_attribute('xlink:href')
         assert current==old_url, 'Displayed preview changed while its replacement was pending'
         for route,response in pending: route.fulfill(response=response)
@@ -1587,6 +1614,7 @@ class Suite:
         self.page.route('**/gang-up/sources',lambda route: pending.append((route,route.fetch())))
         self.select(six)
         self.button('Cancel').wait_for()
+        self.wait_pending(pending)
         self.button('Cancel').click()
         for route,response in pending: route.fulfill(response=response)
         self.page.unroute('**/gang-up/sources')
@@ -1601,12 +1629,13 @@ class Suite:
         source=self.source_ids[-1]
         self.button('Clear').click()
         self.button('Keep working').click()
+        expect(self.page.locator('#workspace-dialog')).to_have_count(0)
+        self.idle()
         self.expect_file('three.pdf')
         pending=[]
         self.page.route('**/gang-up/layout',lambda route:pending.append((route,route.fetch())))
         self.page.locator('#finished-width').fill('4.25')
-        self.page.wait_for_timeout(350)
-        assert pending
+        self.wait_pending(pending)
         self.button('Clear').click()
         self.button('Clear files').click()
         expect(self.button('Browse files')).to_be_visible()
@@ -1679,7 +1708,8 @@ class Suite:
                 self.switch('Impose artwork')
                 self.idle()
                 self.page.wait_for_function("!document.querySelector('.elm-shell').hasAttribute('data-workspace-animating')")
-                frames = self.button(target).evaluate('''button => new Promise(resolve => {
+                self.page.get_by_role('combobox', name='Tool', exact=True).click()
+                frames = self.page.get_by_role('option', name=target, exact=True).evaluate('''button => new Promise(resolve => {
                   const bounds = selector => {
                     const element = document.querySelector(selector);
                     if (!element) return null;
