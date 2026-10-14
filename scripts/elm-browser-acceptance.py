@@ -331,6 +331,9 @@ class Suite:
         expect(control.locator('input:checked')).to_have_count(1)
 
     def presets(self):
+        # Let pending Elm updates and native popover toggles settle before
+        # deciding whether to open; otherwise a second click can close it.
+        self.page.evaluate('() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
         trigger = self.page.get_by_role('button', name='Presets', exact=True)
         if trigger.get_attribute('aria-expanded') != 'true':
             trigger.click()
@@ -344,6 +347,7 @@ class Suite:
         if trigger.get_attribute('aria-expanded') == 'true':
             trigger.click()
         expect(self.page.locator('.elm-presets-menu .da-popover')).to_be_hidden()
+        self.page.evaluate('() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
 
     def assert_pdf(self, path, labels, sizes=None):
         with fitz.open(path) as document:
