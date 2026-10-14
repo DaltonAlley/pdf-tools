@@ -343,10 +343,12 @@ class Suite:
         return menu
 
     def close_presets(self):
+        self.page.evaluate('() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
         trigger = self.page.get_by_role('button', name='Presets', exact=True)
         if trigger.get_attribute('aria-expanded') == 'true':
             trigger.click()
         expect(self.page.locator('.elm-presets-menu .da-popover')).to_be_hidden()
+        expect(trigger).to_have_attribute('aria-expanded', 'false')
         self.page.evaluate('() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
 
     def assert_pdf(self, path, labels, sizes=None):
